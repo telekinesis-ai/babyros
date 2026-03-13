@@ -77,8 +77,8 @@ Received from topic 'hello': 'Hello world!'
 Kill terminal with `Ctrl+C`.
 
 ## Open Issues
-[ ] Datatype information  
-[ ] Safety checks
+- Datatype information  
+- Safety checks
 
 ## License
 Distributed under the Apache-2.0 License. See [LICENSE](LICENSE) for more information.
