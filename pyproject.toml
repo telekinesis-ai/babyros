@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "babyros"
+version = "0.1.0"
+description = "BabyROS: baby version of ROS built on Zenoh"
+readme = "README.md"
+requires-python = ">=3.11,<3.13"
+license = "Apache-2.0"
+license-files = ["LICEN[CS]E*"]
+
+authors = [
+  { name = "Telekinesis", email = "suman.pal@telekinesis.ai" }
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Operating System :: OS Independent",
+  "Intended Audience :: Developers",
+  "Topic :: Software Development :: Libraries",
+  "Topic :: Scientific/Engineering",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "eclipse-zenoh",
+]
+
+[project.optional-dependencies]
+docs = [
+  "mkdocs>=1.6,<2",
+  "mkdocstrings[python]>=0.25,<1",
+  "mkdocs-awesome-pages-plugin>=2,<3",
+]
+
+[project.urls]
+Documentation = "https://docs.telekinesis.ai"
+"Telekinesis BabyROS Repository" = "https://github.com/telekinesis-ai/babyros"
