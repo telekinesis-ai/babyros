@@ -28,6 +28,7 @@ classifiers = [
 
 dependencies = [
     "eclipse-zenoh",
+    "telekinesis-datatypes"
 ]
 
 [project.optional-dependencies]

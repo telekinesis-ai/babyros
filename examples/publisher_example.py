@@ -1,17 +1,31 @@
-"""
-Minimalistic publisher example to go with subscriber_example.py
-"""
-import random
+import time
 from babyros import node
 
-random.seed()
-
-def hello_world():
-    """
-    Minimal pub example
-    """
-    return "Hello world!"
-
 if __name__ == "__main__":
-    pub = node.Publisher("hello", func=hello_world)
-    pub.run()
+    # The session is created automatically inside the Publisher
+    imu_pub = node.Publisher("imu")
+
+    print("Starting sensor stream... (Press Ctrl+C to stop)")
+    count = 0
+    
+    try:
+        # Check SessionManager.is_running() so it stops if the session is closed
+        while node.SessionManager.is_running():
+            data = {
+                "acceleration": [0.1, 0.0, 9.8],
+                "gyro": [0.0, 0.01, 0.0],
+                "seq": [count]
+            }
+            
+            imu_pub.publish(data)
+            print(f"Sent seq: {count}")
+            
+            count += 1
+            time.sleep(0.1)  # 10 Hz
+            
+    except KeyboardInterrupt:
+        print("\n[Publisher] Interrupted by user.")
+    finally:
+        # CRITICAL: Close the Zenoh session gracefully
+        node.SessionManager.stop()
+        print("[Publisher] Cleanup complete.")

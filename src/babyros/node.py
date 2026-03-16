@@ -1,55 +1,96 @@
-"""
-Core BabyROS nodes: Publisher, Subscriber, Client, Server
-"""
 import time
+import threading
+import json
 import zenoh
 
 
-class Subscriber:
-    """
-    Subscriber node
-    """
-    def __init__(self, topic, func, frequency=10):
-        self._func = func
-        self._frequency = frequency
-        self._sleep_time = 1/self._frequency
-        self._topic = topic
-        self._session = zenoh.open(zenoh.Config())
-        self._sub = self._session.declare_subscriber(self._topic, self._func)
+class SessionManager:
+    _session = None
+    _lock = threading.Lock()
+    # Master switch for the whole application
+    _running = threading.Event()
 
+    @classmethod
+    def get_session(cls):
+        with cls._lock:
+            if cls._session is None:
+                cls._session = zenoh.open(zenoh.Config())
+                cls._running.set()
+        return cls._session
     
-    def run(self):
-        """
-        Subscriber node
-        """
-        while True:
-            time.sleep(self._sleep_time)
+    @classmethod
+    def is_running(cls):
+        return cls._running.is_set()
 
+    @classmethod
+    def stop(cls):
+        """Signal all nodes to stop and close the session."""
+        with cls._lock:
+            cls._running.clear()
+            if cls._session:
+                cls._session.close()
+                cls._session = None
+
+
+class Subscriber:
+    def __init__(self, topic, callback, frequency=10):
+        self._topic = topic
+        self._callback = callback
+        self._sleep_time = 1/frequency
+        self._session = SessionManager.get_session()
+        
+        # Zenoh-native: background thread starts here
+        self._sub = self._session.declare_subscriber(self._topic, self._callback_wrapper)
+
+    def _callback_wrapper(self, sample):
+        # Zenoh native deserialization (handles JSON/ZBytes)
+        data = self._deserialize(sample)
+        self._callback(data)
+
+    def _deserialize(self, sample):
+        """
+        Deserialize Zenoh sample payload into Python data structure.
+        """
+        try:
+            deserialized_data = json.loads(sample.payload.to_string())
+            return deserialized_data
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize data: {e}") from e
+
+    def run(self):
+        """Blocking loop that stays alive until SessionManager.stop()"""
+        try:
+            while SessionManager.is_running():
+                time.sleep(self._sleep_time)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            SessionManager.stop()
 
 
 class Publisher:
     """
-    Publisher node
+    Publisher class for publishing messages to a Zenoh topic.
     """
-    def __init__(self, topic, func, frequency=10):
-        self._func = func
-        self._frequency = frequency
-        self._sleep_time = 1/self._frequency
+    def __init__(self, topic):
         self._topic = topic
-        self._session = zenoh.open(zenoh.Config())
+        self._session = SessionManager.get_session()
         self._pub = self._session.declare_publisher(self._topic)
 
-    def run(self):
+    def publish(self, data):
         """
-        Launch publisher
+        Publish data to the Zenoh topic.
         """
-        while True:
-             out = self._func()
+        # Zenoh native serialization
+        serialized_data = self._serialize(data)
+        self._pub.put(serialized_data)
 
-             # TODO: how to know the datatype from before?
-             buf = f"{out}"
-
-             print(f"Publishing on topic '{self._topic}': '{buf}'")
-             self._pub.put(buf)
-
-             time.sleep(self._sleep_time)
+    def _serialize(self, data):
+        """
+        Serialize data for Zenoh transport.
+        """
+        try:
+            payload = zenoh.ZBytes(json.dumps(data))
+            return payload
+        except Exception as e:
+            raise ValueError(f"Failed to serialize data: {e}") from e

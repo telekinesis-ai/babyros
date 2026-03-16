@@ -1,14 +1,17 @@
-"""
-Minimal subscriber example to go with publisher_example.py
-"""
 from babyros import node
 
-def listener(sample):
+# Define what to do when data arrives
+def log_imu(msg):
     """
-    Minimal listener callback
+    Callback function to log IMU data.
     """
-    print(f"Received from topic 'hello': '{sample.payload.to_string()}'")
+    print(f"Received IMU data: Seq {msg['seq']} | Accel: {msg['acceleration']}")
+
 
 if __name__ == "__main__":
-    sub = node.Subscriber("hello", func=listener)
+    # Initialize the subscriber
+    sub = node.Subscriber("imu", log_imu)
+
+    # Keep the script alive without burning CPU
     sub.run()
+
