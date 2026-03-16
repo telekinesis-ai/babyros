@@ -115,6 +115,5 @@ class Server:
     Zenoh Server Example, built on Zenoh Queryable
     """
     def __init__(self):
-        self._sess
-
-    def 
+        self._session = SessionManager.get_session()
+        
