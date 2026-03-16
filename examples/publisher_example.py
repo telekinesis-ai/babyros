@@ -6,7 +6,7 @@ from babyros import node
 
 if __name__ == "__main__":
     # The session is created automatically inside the Publisher
-    imu_pub = node.Publisher("imu")
+    imu_pub = node.Publisher(topic="imu")
 
     print("Starting sensor stream... (Press Ctrl+C to stop)")
     count = 0
@@ -20,7 +20,7 @@ if __name__ == "__main__":
                 "seq": [count]
             }
             
-            imu_pub.publish(data)
+            imu_pub.publish(data=data)
             print(f"Sent seq: {count}")
             
             count += 1

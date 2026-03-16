@@ -13,7 +13,7 @@ def log_imu(msg):
 
 if __name__ == "__main__":
     # Initialize the subscriber
-    sub = node.Subscriber("imu", log_imu)
+    sub = node.Subscriber(topic="imu", callback=log_imu)
 
     # Keep the script alive without burning CPU
     sub.run()

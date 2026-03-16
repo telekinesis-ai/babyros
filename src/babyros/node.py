@@ -109,3 +109,12 @@ class Publisher:
             return payload
         except Exception as e:
             raise ValueError(f"Failed to serialize data: {e}") from e
+
+class Server:
+    """
+    Zenoh Server Example, built on Zenoh Queryable
+    """
+    def __init__(self):
+        self._sess
+
+    def 
