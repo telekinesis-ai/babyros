@@ -56,12 +56,7 @@ Open a terminal and run:
 python examples/publisher_example.py
 ```
 
-Expected output:
-```bash
-Publishing on topic 'hello': 'Hello world!'
-```
-
-Kill terminal with `Ctrl+C`.
+When testing is done, kill terminal with `Ctrl+C`.
 
 ### Subscriber
 In a second terminal (with the `babyros` environment active), run:
@@ -69,12 +64,7 @@ In a second terminal (with the `babyros` environment active), run:
 python examples/subscriber_example.py
 ```
 
-Expected output:
-```bash
-Received from topic 'hello': 'Hello world!'
-```
-
-Kill terminal with `Ctrl+C`.
+When testing is done, kill terminal with `Ctrl+C`.
 
 ## Open Issues
 - Datatype information  
