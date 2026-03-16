@@ -1,6 +1,7 @@
 """
 Zenoh Subscriber Example
 """
+import time
 from babyros import node
 
 # Define what to do when data arrives
@@ -15,6 +16,6 @@ if __name__ == "__main__":
     # Initialize the subscriber
     sub = node.Subscriber(topic="imu", callback=log_imu)
 
-    # Keep the script alive without burning CPU
-    sub.run()
+    # Keep the script alive for 100 seconds
+    time.sleep(100)
 

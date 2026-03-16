@@ -72,16 +72,6 @@ class Subscriber:
         except Exception as e:
             raise ValueError(f"Failed to deserialize data: {e}") from e
 
-    def run(self):
-        """Blocking loop that stays alive until SessionManager.stop()"""
-        try:
-            while SessionManager.is_running():
-                time.sleep(self._sleep_time)
-        except KeyboardInterrupt:
-            pass
-        finally:
-            SessionManager.stop()
-
     def delete(self):
         """
         Cleanly delete subscriber.
@@ -127,19 +117,47 @@ class Server:
     """
     BabyROS Server, built on Zenoh Queryable
     """
-    def __init__(self, topic):
+    def __init__(self, topic, callback):
         self._topic = topic
+        self._callback = callback
         self._session = SessionManager.get_session()
-        self._queryable = self._session.declare_queryable(self._topic)
+        self._queryable = self._session.declare_queryable(self._topic, self._handle_request)
 
-    def get(self, query):
+    def _serialize(self, data):
+        """
+        Serialize Python data structure into Zenoh-compatible format.
+        """
+        try:
+            payload = zenoh.ZBytes(json.dumps(data))
+            return payload
+        except Exception as e:
+            raise ValueError(f"Failed to serialize data: {e}") from e
+
+    def _handle_request(self, request):
+        """
+        Wrapper for the queryable callback.
+        """
+        response_data = self._callback()
+        # Send the response back through the query object
+        request.reply(
+            zenoh.Sample(self._topic, self._serialize(response_data))
+        )
+
+    def get(self, request):
         """
         Handle a GET request on the queryable topic.
         """
-        # Implement logic to process the query and return a response
-        response = {"message": f"Received query: {query}"}
+        response = {"message": f"Received request: {request}"}
         return response
 
+    def close(self):
+        """
+        Cleanly close the server.
+        """
+        try:
+            self._queryable.undeclare()
+        except Exception as e:
+            raise ValueError(f"Failed to close Server: {e}") from e
 
 class Client:
     """
@@ -147,3 +165,36 @@ class Client:
     """
     def __init__(self):
         self._session = SessionManager.get_session()
+
+    def request(self, topic, data=None):
+        """
+        Send a request to a Zenoh topic and wait for a response.
+        """
+        replies = self._session.get(topic, zenoh.Queue())
+
+        results = []
+        for reply in replies.receiver:
+            try:
+                # Access the data within the reply
+                data = self._deserialize(reply.ok.payload.payload)
+                results.append(data)
+            except Exception as e:
+                print(f"Error parsing reply: {e}")
+        
+        return results
+
+    def _deserialize(self, payload):
+        """
+        Deserialize Zenoh payload into Python data structure.
+        """
+        try:
+            data = json.loads(payload.to_string())
+            return data
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize data: {e}") from e
+
+    def close(self):
+        """
+        Close the Zenoh session.
+        """
+        self._session.close()
