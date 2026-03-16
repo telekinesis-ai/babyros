@@ -143,11 +143,11 @@ class Server:
         Serialize data for Zenoh transport.
         """
         try:
-            payload = zenoh.ZBytes(json.dumps(data))
+            payload = json.dumps(data)
             return payload
         except Exception as e:
             raise ValueError(f"Failed to serialize data: {e}") from e
-    
+        
     def _deserialize(self, sample):
         """
         Deserialize Zenoh sample payload into Python data structure.
@@ -167,13 +167,16 @@ class Server:
         try:
             request_data = None
             if query.payload is not None:
-                request_data = self._deserialize(query.payload)
+                request_data = self._deserialize(query)
+            else:
+                request_data = None
 
             # Call the user-provided callback
             response = self._callback(request_data)
+            serialized_data = self._serialize(response)
 
             # Correct Zenoh Python reply
-            query.reply(self._topic, self._serialize(response))
+            query.reply(self._topic, serialized_data)
 
         except Exception as e:
             query.reply_err(str(e))
@@ -200,7 +203,7 @@ class Client:
         Serialize data for Zenoh transport.
         """
         try:
-            payload = zenoh.ZBytes(json.dumps(data))
+            payload = json.dumps(data)
             return payload
         except Exception as e:
             raise ValueError(f"Failed to serialize data: {e}") from e
@@ -215,15 +218,15 @@ class Client:
         except Exception as e:
             raise ValueError(f"Failed to deserialize data: {e}") from e
 
-    def request(self, params=None):
+    def request(self, data=None):
         """
         Send a request to the specified topic with optional parameters.
         """
-        replies = self._querier.get()
+        replies = self._querier.get(payload=self._serialize(data) if data else None)
         results = []
         for reply in replies:
             if reply.ok:
-                results.append(reply.ok.payload.to_string())
+                results.append(self._deserialize(reply.ok))
             else:
                 print(f">> Error: {reply.err.payload.to_string()}")
         

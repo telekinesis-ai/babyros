@@ -18,8 +18,10 @@ def handle_request(request):
     """
 
     if request is None:
+        print("Callback method! No request payload received.")
         return {"message": "No request received!"}
 
+    print("Correct data processesed!")
     return {
         "message": "Hello from server!",
         "received": request
