@@ -82,6 +82,12 @@ class Subscriber:
         finally:
             SessionManager.stop()
 
+    def delete(self):
+        """
+        Cleanly delete subscriber.
+        """
+        self._sub.delete()
+
 
 class Publisher:
     """
@@ -109,11 +115,35 @@ class Publisher:
             return payload
         except Exception as e:
             raise ValueError(f"Failed to serialize data: {e}") from e
+        
+    def delete(self):
+        """
+        Cleanly delete publisher.
+        """
+        self._pub.delete()
+
 
 class Server:
     """
-    Zenoh Server Example, built on Zenoh Queryable
+    BabyROS Server, built on Zenoh Queryable
+    """
+    def __init__(self, topic):
+        self._topic = topic
+        self._session = SessionManager.get_session()
+        self._queryable = self._session.declare_queryable(self._topic)
+
+    def get(self, query):
+        """
+        Handle a GET request on the queryable topic.
+        """
+        # Implement logic to process the query and return a response
+        response = {"message": f"Received query: {query}"}
+        return response
+
+
+class Client:
+    """
+    BabyROS Client, built on Zenoh Querier
     """
     def __init__(self):
         self._session = SessionManager.get_session()
-        
