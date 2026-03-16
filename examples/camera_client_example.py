@@ -1,3 +1,6 @@
+"""
+Camera client for capturing images from a camera server.
+"""
 import base64
 import numpy as np
 
@@ -29,6 +32,7 @@ class Camera:
         else:
             print("No response from camera server.")
             return None
+
 
 if __name__ == "__main__":
     camera = Camera()
