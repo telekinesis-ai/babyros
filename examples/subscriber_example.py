@@ -16,6 +16,7 @@ if __name__ == "__main__":
     # Initialize the subscriber
     sub = node.Subscriber(topic="imu", callback=log_imu)
 
-    # Keep the script alive for 100 seconds
-    time.sleep(100)
+    # Keep the script alive for 5 seconds
+    time.sleep(5)
+    sub.delete()
 

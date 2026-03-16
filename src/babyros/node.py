@@ -1,10 +1,20 @@
 """
-Zenoh Node
+Core module definining BabyROS publisher, subscriber, server and client.
 """
-import time
 import threading
 import json
 import zenoh
+
+
+def get_alive_topics():
+    """
+    Returns a list of all key expressions currently active in the Zenoh network.
+    """
+    s = SessionManager.get_session()
+    replies = s.get("**")
+
+    for r in replies:
+        print(r)
 
 
 class SessionManager:
@@ -46,7 +56,7 @@ class SessionManager:
 
 class Subscriber:
     """
-    Subscriber class for receiving messages from a Zenoh topic.
+    BabyROS Subscriber class (based on Zenoh Subscriber) for receiving messages from a topic.
     """
     def __init__(self, topic, callback, frequency=10):
         self._topic = topic
@@ -81,7 +91,7 @@ class Subscriber:
 
 class Publisher:
     """
-    Publisher class for publishing messages to a Zenoh topic.
+    BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
     def __init__(self, topic):
         self._topic = topic
@@ -115,12 +125,13 @@ class Publisher:
 
 class Server:
     """
-    BabyROS Server class for handling requests on a topic, based on Zenoh Queryables.
+    BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
     def __init__(self, topic, callback):
         self._topic = topic
         self._callback = callback # Callback should expect 'request_data'
         self._session = SessionManager.get_session()
+
         # Note: handle_query is the standard name for the callback
         self._queryable = self._session.declare_queryable(
             self._topic, 
@@ -128,60 +139,98 @@ class Server:
         )
 
     def _serialize(self, data):
-        # json.dumps returns a string, Zenoh wants bytes or ZBytes
-        return json.dumps(data).encode('utf-8')
-
+        """
+        Serialize data for Zenoh transport.
+        """
+        try:
+            payload = zenoh.ZBytes(json.dumps(data))
+            return payload
+        except Exception as e:
+            raise ValueError(f"Failed to serialize data: {e}") from e
+    
+    def _deserialize(self, sample):
+        """
+        Deserialize Zenoh sample payload into Python data structure.
+        """
+        try:
+            deserialized_data = json.loads(sample.payload.to_string())
+            return deserialized_data
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize data: {e}") from e
+    
     def _handle_request(self, query):
         """
-        The query object contains the selector and potential value (params).
+        Handle a client request using Zenoh query/reply correctly.
         """
-        # If the client sent parameters in the query
-        incoming_value = None
-        if query.value is not None:
-            incoming_value = json.loads(query.value.payload.to_string())
+        print(f"Received request on '{query.selector}'")
 
-        # Execute the user-provided logic
-        response_data = self._callback(incoming_value)
-        
-        # Create a Sample to reply
-        # We use the query's own key_selector to ensure the reply matches
-        sample = zenoh.Sample(query.key_selector, self._serialize(response_data))
-        query.reply(sample)
+        try:
+            request_data = None
+            if query.payload is not None:
+                request_data = self._deserialize(query.payload)
 
-    def close(self):
+            # Call the user-provided callback
+            response = self._callback(request_data)
+
+            # Correct Zenoh Python reply
+            query.reply(self._topic, self._serialize(response))
+
+        except Exception as e:
+            query.reply_err(str(e))
+
+    def delete(self):
+        """
+        Close the server and release resources.
+        """
         self._queryable.undeclare()
 
 
 class Client:
-    def __init__(self):
+    """
+    BabyROS Client based on Zenoh queries.
+    """
+
+    def __init__(self, topic):
+        self._topic = topic
         self._session = SessionManager.get_session()
+        self._querier = self._session.declare_querier(self._topic)
 
-    def request(self, topic, params=None):
+    def _serialize(self, data):
         """
-        topic: The key expression
-        params: Optional dict to send to the server
+        Serialize data for Zenoh transport.
         """
-        # Serialize params if provided
-        value = json.dumps(params).encode('utf-8') if params else None
-        
-        # .get() returns a 'Reply' receiver
-        replies = self._session.get(topic, value=value)
+        try:
+            payload = zenoh.ZBytes(json.dumps(data))
+            return payload
+        except Exception as e:
+            raise ValueError(f"Failed to serialize data: {e}") from e
 
+    def _deserialize(self, sample):
+        """
+        Deserialize Zenoh sample payload into Python data structure.
+        """
+        try:
+            deserialized_data = json.loads(sample.payload.to_string())
+            return deserialized_data
+        except Exception as e:
+            raise ValueError(f"Failed to deserialize data: {e}") from e
+
+    def request(self, params=None):
+        """
+        Send a request to the specified topic with optional parameters.
+        """
+        replies = self._querier.get()
         results = []
-        # The receiver is an iterable of 'Reply' objects
         for reply in replies:
-            if reply.is_ok():
-                try:
-                    # Correct way to grab the payload bytes
-                    payload_bytes = reply.ok.payload.payload
-                    results.append(self._deserialize(payload_bytes))
-                except Exception as e:
-                    print(f"Error parsing reply: {e}")
-            elif reply.is_err():
-                print(f"Received error from network: {reply.err.payload.to_string()}")
+            if reply.ok:
+                results.append(reply.ok.payload.to_string())
+            else:
+                print(f">> Error: {reply.err.payload.to_string()}")
         
         return results
 
-    def _deserialize(self, payload):
-        # Zenoh buffers have a to_string() method which is very handy
-        return json.loads(payload.decode('utf-8'))
+    def delete(self):
+        """
+        Cleanly delete the client.
+        """
+        pass

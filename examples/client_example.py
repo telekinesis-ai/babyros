@@ -1,10 +1,14 @@
 """
 BabyROS Client Example
 """
+
 from babyros import node
 
+
 if __name__ == "__main__":
-    # Example usage
-    client = node.Client()
-    response = client.request("/example/topic")
+    client = node.Client(topic="example/topic")
+
+    # Send request to the server
+    response = client.request()
+
     print(response)
