@@ -1,3 +1,6 @@
+"""
+Zenoh Node
+"""
 import time
 import threading
 import json
@@ -5,6 +8,9 @@ import zenoh
 
 
 class SessionManager:
+    """
+    Manages the Zenoh session for the application.å
+    """
     _session = None
     _lock = threading.Lock()
     # Master switch for the whole application
@@ -12,6 +18,9 @@ class SessionManager:
 
     @classmethod
     def get_session(cls):
+        """
+        Get the Zenoh session, creating it if necessary.
+        """
         with cls._lock:
             if cls._session is None:
                 cls._session = zenoh.open(zenoh.Config())
@@ -20,6 +29,9 @@ class SessionManager:
     
     @classmethod
     def is_running(cls):
+        """
+        Check if the Zenoh session is running.
+        """
         return cls._running.is_set()
 
     @classmethod
@@ -33,6 +45,9 @@ class SessionManager:
 
 
 class Subscriber:
+    """
+    Subscriber class for receiving messages from a Zenoh topic.
+    """
     def __init__(self, topic, callback, frequency=10):
         self._topic = topic
         self._callback = callback

@@ -1,3 +1,6 @@
+"""
+Zenoh Subscriber Example
+"""
 from babyros import node
 
 # Define what to do when data arrives
