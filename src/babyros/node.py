@@ -6,6 +6,11 @@ import json
 import struct
 import numpy as np
 import zenoh
+import os
+
+os.environ["RUST_LOG"] = "zenoh=trace"
+zenoh.init_logger()
+
 
 def get_alive_topics():
     """
@@ -23,6 +28,7 @@ class SessionManager:
     Manages the Zenoh session for the application.å
     """
     _session = None
+    zenoh.init_logger()
     _lock = threading.Lock()
     # Master switch for the whole application
     _running = threading.Event()
@@ -42,16 +48,6 @@ class SessionManager:
                 # BIG impact settings
                 config.insert_json5("transport/link/tx/batch_size", "1048576")  # 1MB
                 config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
-
-                # Max queue sizes
-                for p in ["data", "data_high", "background"]:
-                    config.insert_json5(f"transport/link/tx/queue/size/{p}", "16")
-
-                # Disable batching for large payloads
-                config.insert_json5("transport/link/tx/queue/batching/enabled", "false")
-
-                # Compression (optional)
-                config.insert_json5("transport/unicast/compression/enabled", "true")
 
                 cls._session = zenoh.open(config)
                 cls._running.set()
