@@ -3,8 +3,9 @@ Core module definining BabyROS publisher, subscriber, server and client.
 """
 import threading
 import json
+import struct
+import numpy as np
 import zenoh
-
 
 def get_alive_topics():
     """
@@ -251,8 +252,13 @@ class ImagePublisher:
         """
         Publish an image to the topic.
         """
-        image_bytes = image.tobytes()
-        self._pub.put(image_bytes)
+        h, w, c = image.shape
+        # Pack metadata into a small byte string
+        meta = struct.pack('iii', h, w, c)
+        
+        # Put the raw image, but attach the metadata separately
+        # No concatenation = No memory copy
+        self._pub.put(image.tobytes(), attachment=meta)
     
     def delete(self):
         """
@@ -272,11 +278,12 @@ class ImageSubscriber:
         self._sub = self._session.declare_subscriber(self._topic, self._callback_wrapper)
 
     def _callback_wrapper(self, sample):
-        """
-        Wrapper for the subscriber callback.
-        """
-        image_bytes = sample.payload.to_bytes()
-        self._callback(image_bytes)
+        # Extract dimensions from the attachment (12 bytes)
+        h, w, c = struct.unpack('iii', sample.attachment.to_bytes())
+        
+        # Map the payload directly to an array (Zero-Copy)
+        image = np.frombuffer(sample.payload.to_bytes(), dtype=np.uint8).reshape((h, w, c))
+        self._callback(image)
 
     def delete(self):
         """

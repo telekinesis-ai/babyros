@@ -7,12 +7,11 @@ import time
 from babyros import node
 
 
-def process_image(image_bytes):
+def process_image(image):
         """
         Process the received image.
         """
         # Process the image (e.g., display it, save it, etc.)
-        image = np.frombuffer(image_bytes, dtype=np.uint8).reshape((5112, 3840, 3))
         print("Received image with shape:", image.shape)
 
 if __name__ == "__main__":
