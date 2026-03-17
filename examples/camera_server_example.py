@@ -30,6 +30,7 @@ class CameraServer:
         Delete the camera resources.
         """
         self.capture_server.delete()
+        node.SessionManager.delete()
 
 
 if __name__ == "__main__":

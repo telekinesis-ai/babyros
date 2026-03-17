@@ -32,7 +32,14 @@ class Camera:
         else:
             print("No response from camera server.")
             return None
-
+    
+    def close(self):
+        """
+        Closes the camera client and stops the session.
+        """
+        self.camera_client.delete()
+        node.SessionManager.delete() # This is the "Master Switch"
+    
 
 if __name__ == "__main__":
     camera = Camera()
@@ -42,3 +49,5 @@ if __name__ == "__main__":
         print("Captured image shape: ", image.shape)
     else:
         print("Failed to capture image.")
+
+    camera.close()

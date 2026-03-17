@@ -46,7 +46,7 @@ class SessionManager:
         return cls._running.is_set()
 
     @classmethod
-    def stop(cls):
+    def delete(cls):
         """Signal all nodes to stop and close the session."""
         with cls._lock:
             cls._running.clear()

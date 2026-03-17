@@ -19,4 +19,5 @@ if __name__ == "__main__":
     # Keep the script alive for 5 seconds
     time.sleep(5)
     sub.delete()
+    node.SessionManager.delete() # This is the "Master Switch"
 

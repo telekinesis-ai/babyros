@@ -39,3 +39,4 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Shutting down server...")
         server.delete()
+        node.SessionManager.delete() # This is the "Master Switch"

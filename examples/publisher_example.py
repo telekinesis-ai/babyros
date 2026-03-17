@@ -30,5 +30,5 @@ if __name__ == "__main__":
         print("\n[Publisher] Interrupted by user.")
     finally:
         # CRITICAL: Close the Zenoh session gracefully
-        node.SessionManager.stop()
+        node.SessionManager.delete()
         print("[Publisher] Cleanup complete.")
