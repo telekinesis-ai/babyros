@@ -61,7 +61,6 @@ class Subscriber:
     def __init__(self, topic, callback, frequency=10):
         self._topic = topic
         self._callback = callback
-        self._sleep_time = 1/frequency
         self._session = SessionManager.get_session()
         
         # Zenoh-native: background thread starts here
@@ -236,4 +235,51 @@ class Client:
         """
         Cleanly delete the client.
         """
-        pass
+        self._querier.undeclare()
+
+
+class ImagePublisher:
+    """
+    Image Publisher for Zenoh.
+    """
+    def __init__(self, topic):
+        self._topic = topic
+        self._session = SessionManager.get_session()
+        self._pub = self._session.declare_publisher(self._topic)
+
+    def publish(self, image):
+        """
+        Publish an image to the topic.
+        """
+        image_bytes = image.tobytes()
+        self._pub.put(image_bytes)
+    
+    def delete(self):
+        """
+        Cleanly delete publisher.
+        """
+        self._pub.undeclare()
+
+
+class ImageSubscriber:
+    """
+    Image Subscriber for Zenoh.
+    """
+    def __init__(self, topic, callback):
+        self._topic = topic
+        self._callback = callback
+        self._session = SessionManager.get_session()
+        self._sub = self._session.declare_subscriber(self._topic, self._callback_wrapper)
+
+    def _callback_wrapper(self, sample):
+        """
+        Wrapper for the subscriber callback.
+        """
+        image_bytes = sample.payload.to_bytes()
+        self._callback(image_bytes)
+
+    def delete(self):
+        """
+        Cleanly delete subscriber.
+        """
+        self._sub.undeclare()
