@@ -34,7 +34,16 @@ class SessionManager:
         """
         with cls._lock:
             if cls._session is None:
-                cls._session = zenoh.open(zenoh.Config())
+                config = zenoh.Config()
+
+                # Set link buffers to ~100MB
+                config.insert_json5("transport/link/rx/buffer_size", "104857600")
+
+                # Set priority queue lengths to the maximum allowed (16)
+                config.insert_json5("transport/link/tx/queue/size/data", "16")
+                config.insert_json5("transport/link/tx/queue/size/data_high", "16")
+
+                cls._session = zenoh.open(config)
                 cls._running.set()
         return cls._session
     
