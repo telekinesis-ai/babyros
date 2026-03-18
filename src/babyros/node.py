@@ -74,7 +74,7 @@ class Subscriber:
     """
     BabyROS Subscriber class (based on Zenoh Subscriber) for receiving messages from a topic.
     """
-    def __init__(self, topic, callback, frequency=10):
+    def __init__(self, topic, callback):
         self._topic = topic
         self._callback = callback
         self._session = SessionManager.get_session()
@@ -243,7 +243,7 @@ class Client:
             if reply.ok:
                 results.append(self._deserialize(reply.ok))
             else:
-                print(f">> Error: {reply.err.payload.to_string()}")
+                print(f"Error in client: {reply.err.payload.to_string()}")
         
         return results
 
