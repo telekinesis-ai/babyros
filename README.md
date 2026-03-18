@@ -47,6 +47,9 @@ Install the package in editable mode for development:
 pip install -e .
 ```
 
+### (For Inter-Device Communication) Installation
+Install the Zenoh router. Documentation available in: [Zenoh Docs](https://zenoh.io/docs/getting-started/installation/)
+
 ## Usage Example
 To see BabyROS in action, you can run the provided example scripts.
 
