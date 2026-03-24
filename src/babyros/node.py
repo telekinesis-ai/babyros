@@ -6,57 +6,73 @@ import json
 import struct
 import numpy as np
 import zenoh
-
+from loguru import logger
 
 class SessionManager:
     """
     Manages the Zenoh session for the application.
     """
     _session = None
-    _lock = threading.Lock()
-    # Master switch for the whole application
-    _running = threading.Event()
-    _config = None
+    _lock = threading.RLock()
+    _config = zenoh.Config()  # Default config, can be overridden by user using set_session_config
+
+    @classmethod
+    def set_session_config(cls, config=None):
+        """
+        Set the Zenoh configuration before creating the session.
+        Raises an error if session already exists.
+        """
+        with cls._lock:
+            if cls._session is not None:
+                raise RuntimeError("Cannot set config after session has been created")
+            if config is not None:
+                cls._config = config
+
+    @classmethod
+    def create_session(cls):
+        """
+        Create a new Zenoh session using the stored config.
+        Raises an error if the session already exists.
+        """
+        with cls._lock:
+            if cls._session is not None:
+                raise RuntimeError("Session already exists")
+            
+            # Configure session with important defaults
+            cls._config.insert_json5("transport/link/tx/batch_size", "1048576")  # 1MB
+            cls._config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
+
+            cls._session = zenoh.open(cls._config)
+            return cls._session
 
     @classmethod
     def get_session(cls):
         """
-        Get the Zenoh session, creating it if necessary.
+        Return the existing Zenoh session, or create it if it doesn't exist.
         """
-        with cls._lock:
-            if not cls._running.is_set() and cls._session is not None:
-                raise RuntimeError("Session is shutting down")
-            
+        with cls._lock:            
             if cls._session is None:
-                # Set link buffers to ~100MB
-                config = zenoh.Config()
-
-                # BIG impact settings
-                config.insert_json5("transport/link/tx/batch_size", "1048576")  # 1MB
-                config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
-
-                cls._session = zenoh.open(config)
-                cls._running.set()
-        return cls._session
-    
-    @classmethod
-    def is_running(cls):
-        """
-        Check if the Zenoh session is running.
-        """
-        return cls._running.is_set()
+                # Create session using create_session
+                cls.create_session()
+            
+            return cls._session
 
     @classmethod
     def delete(cls):
-        """Signal all nodes to stop and close the session."""
+        """
+        Signal all nodes to stop and close the session.
+        """
         with cls._lock:
-            if not cls._running.is_set():
-                return  # already stopped
-            
-            cls._running.clear()
             if cls._session:
-                cls._session.close()
-                cls._session = None
+                try:
+                    cls._session.close()
+                    logger.info("Zenoh session closed successfully.")
+                except Exception as e:
+                    logger.error(f"Warning: Error closing session: {e}")
+                finally:
+                    cls._session = None
+            else:
+                logger.warning("No session to delete.")
 
 
 class Subscriber:
@@ -91,6 +107,7 @@ class Subscriber:
         Cleanly delete subscriber.
         """
         self._sub.undeclare()
+        logger.info(f"Subscriber on topic '{self._topic}' deleted.")
 
 
 class Publisher:
@@ -125,6 +142,7 @@ class Publisher:
         Cleanly delete publisher.
         """
         self._pub.undeclare()
+        logger.info(f"Publisher on topic '{self._topic}' deleted.")
 
 
 class Server:
@@ -166,7 +184,7 @@ class Server:
         """
         Handle a client request using Zenoh query/reply correctly.
         """
-        print(f"Received request on '{query.selector}'")
+        logger.info(f"Received request on '{query.selector}'")
 
         try:
             request_data = None
@@ -190,6 +208,7 @@ class Server:
         Close the server and release resources.
         """
         self._queryable.undeclare()
+        logger.info(f"Server on topic '{self._topic}' deleted.")
 
 class Client:
     """
@@ -231,7 +250,7 @@ class Client:
             if reply.ok:
                 results.append(self._deserialize(reply.ok))
             else:
-                print(f"Error in client: {reply.err.payload.to_string()}")
+                logger.error(f"Error in client: {reply.err.payload.to_string()}")
         
         return results
 
@@ -240,6 +259,7 @@ class Client:
         Cleanly delete the client.
         """
         self._querier.undeclare()
+        logger.info(f"Client for topic '{self._topic}' deleted.")
 
 
 class ImagePublisher:
@@ -268,6 +288,7 @@ class ImagePublisher:
         Cleanly delete publisher.
         """
         self._pub.undeclare()
+        logger.info(f"ImagePublisher on topic '{self._topic}' deleted.")
 
 
 class ImageSubscriber:
@@ -293,3 +314,4 @@ class ImageSubscriber:
         Cleanly delete subscriber.
         """
         self._sub.undeclare()
+        logger.info(f"ImageSubscriber on topic '{self._topic}' deleted.")

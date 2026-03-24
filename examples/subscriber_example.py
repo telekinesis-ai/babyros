@@ -13,13 +13,19 @@ def log_imu(msg):
 
 
 if __name__ == "__main__":
-    # Initialize the subscriber
     sub = node.Subscriber(topic="imu", callback=log_imu)
-
     print("Created subscriber successfully!")
 
     # Keep the script alive for 5 seconds
-    time.sleep(5)
-
-    print("Complete subscriber_example successfully!")
+    try:
+        # Keep the main thread alive while the Zenoh callback runs in the background
+        while True:
+            time.sleep(1) 
+    except KeyboardInterrupt:
+        print("\n[Subscriber] Interrupted by user.")
+    finally:
+        # CRITICAL: Close the Zenoh session gracefully
+        sub.delete()  # Cleanly delete the subscriber
+        node.SessionManager.delete()
+        print("Complete subscriber_example successfully!")
 

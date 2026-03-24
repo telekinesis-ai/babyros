@@ -1,11 +1,11 @@
-# import atexit
+# # import atexit
 
-from babyros.node import SessionManager
+# from babyros.node import SessionManager
 
-# atexit.register(SessionManager.delete)
+# # atexit.register(SessionManager.delete)
 
-def configure():
-    """
-    Configure the BabyROS environment.
-    """
-    print("Configuring BabyROS...")
+# def configure():
+#     """
+#     Configure the BabyROS environment.
+#     """
+#     SessionManager.set_config()

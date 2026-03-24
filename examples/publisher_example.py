@@ -12,8 +12,7 @@ if __name__ == "__main__":
     count = 0
     
     try:
-        # Check SessionManager.is_running() so it stops if the session is closed
-        while node.SessionManager.is_running():
+        while True:
             data = {
                 "acceleration": [0.1, 0.0, 9.8],
                 "gyro": [0.0, 0.01, 0.0],
@@ -30,5 +29,6 @@ if __name__ == "__main__":
         print("\n[Publisher] Interrupted by user.")
     finally:
         # CRITICAL: Close the Zenoh session gracefully
+        imu_pub.delete()
         node.SessionManager.delete()
         print("[Publisher] Cleanup complete.")
