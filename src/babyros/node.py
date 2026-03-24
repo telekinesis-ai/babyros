@@ -6,29 +6,77 @@ import json
 import struct
 import numpy as np
 import zenoh
-import os
-
-
-
-def get_alive_topics():
-    """
-    Returns a list of all key expressions currently active in the Zenoh network.
-    """
-    s = SessionManager.get_session()
-    replies = s.get("**")
-
-    for r in replies:
-        print(r)
 
 
 class SessionManager:
     """
-    Manages the Zenoh session for the application.å
+    Manages the Zenoh session for the application.
     """
     _session = None
     _lock = threading.Lock()
     # Master switch for the whole application
     _running = threading.Event()
+    _config = None
+
+    def set_config_params(self,
+                connection_endpoints=["tcp/localhost:7447"],
+                multicast=False,
+                mode="peer",
+
+                router_timestamp=True,
+                peer_timestamp=True,
+                client_timestamp=True,
+
+                max_sessions=10000,
+                accept_pending=10000,
+
+                open_timeout=60000,
+                accept_timeout=60000,
+
+                connect_timeout_router=-1,
+                connect_timeout_peer=-1,
+                connect_timeout_client=0,
+
+                exit_on_failure_client=True,
+
+                retry_period_init_ms=1000,
+                retry_period_max_ms=4000,
+
+                gossip_to_router_only=True,
+
+                shared_memory=False,
+
+                queries_timeout=600000,
+                ):
+        
+        self._connection_endpoints = connection_endpoints
+        self._multicast = multicast
+        self._mode = mode
+
+        self._router_timestamp = router_timestamp
+        self._peer_timestamp = peer_timestamp
+        self._client_timestamp = client_timestamp
+
+        self._max_sessions = max_sessions
+        self._accept_pending = accept_pending
+
+        self._open_timeout = open_timeout
+        self._accept_timeout = accept_timeout
+
+        self._connect_timeout_router = connect_timeout_router
+        self._connect_timeout_peer = connect_timeout_peer
+        self._connect_timeout_client = connect_timeout_client
+
+        self._exit_on_failure_client = exit_on_failure_client
+
+        self._retry_period_init_ms = retry_period_init_ms
+        self._retry_period_max_ms = retry_period_max_ms
+
+        self._gossip_to_router_only = gossip_to_router_only
+
+        self._shared_memory = shared_memory
+
+        self._queries_timeout = queries_timeout
 
     @classmethod
     def get_session(cls):
@@ -36,9 +84,10 @@ class SessionManager:
         Get the Zenoh session, creating it if necessary.
         """
         with cls._lock:
+            if not cls._running.is_set() and cls._session is not None:
+                raise RuntimeError("Session is shutting down")
+            
             if cls._session is None:
-                config = zenoh.Config()
-
                 # Set link buffers to ~100MB
                 config = zenoh.Config()
 
@@ -61,6 +110,9 @@ class SessionManager:
     def delete(cls):
         """Signal all nodes to stop and close the session."""
         with cls._lock:
+            if not cls._running.is_set():
+                return  # already stopped
+            
             cls._running.clear()
             if cls._session:
                 cls._session.close()
@@ -198,7 +250,6 @@ class Server:
         Close the server and release resources.
         """
         self._queryable.undeclare()
-
 
 class Client:
     """

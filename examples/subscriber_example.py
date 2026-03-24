@@ -16,8 +16,10 @@ if __name__ == "__main__":
     # Initialize the subscriber
     sub = node.Subscriber(topic="imu", callback=log_imu)
 
+    print("Created subscriber successfully!")
+
     # Keep the script alive for 5 seconds
     time.sleep(5)
-    sub.delete()
-    node.SessionManager.delete() # This is the "Master Switch"
+
+    print("Complete subscriber_example successfully!")
 
