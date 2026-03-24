@@ -48,13 +48,9 @@ def compare_table_md(d1, d2, filename="zenoh_config_differences.md"):
     print(f"Markdown file generated: {filename}")
 
 
-def load_config():
-    return zenoh.Config.from_file("../config/DEFAULT_RMW_ZENOH_SESSION_CONFIG.json5")
-
-
 if __name__ == "__main__":
     default_config = zenoh.Config()
-    ros_config = load_config()
+    ros_config = zenoh.Config.from_file("../config/DEFAULT_RMW_ZENOH_SESSION_CONFIG.json5")
 
     d1 = config_to_dict(default_config)
     d2 = config_to_dict(ros_config)

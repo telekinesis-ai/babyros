@@ -8,12 +8,13 @@ import numpy as np
 import zenoh
 from loguru import logger
 
+
 class SessionManager:
     """
     Manages the Zenoh session for the application.
     """
     _session = None
-    _lock = threading.RLock()
+    _rlock = threading.RLock()
     _config = zenoh.Config()  # Default config, can be overridden by user using set_session_config
 
     @classmethod
@@ -22,11 +23,20 @@ class SessionManager:
         Set the Zenoh configuration before creating the session.
         Raises an error if session already exists.
         """
-        with cls._lock:
+        with cls._rlock:
             if cls._session is not None:
-                raise RuntimeError("Cannot set config after session has been created")
+                raise RuntimeError("Cannot set config after session has been created. Ensure that 'babyros.configure()' is called before creating any nodes.")
             if config is not None:
                 cls._config = config
+                logger.info("Overwritten default session config with user config.")
+
+    @classmethod
+    def get_session_config(cls):
+        """
+        Get the current Zenoh session configuration.
+        """
+        with cls._rlock:
+            return cls._config
 
     @classmethod
     def create_session(cls):
@@ -34,7 +44,7 @@ class SessionManager:
         Create a new Zenoh session using the stored config.
         Raises an error if the session already exists.
         """
-        with cls._lock:
+        with cls._rlock:
             if cls._session is not None:
                 raise RuntimeError("Session already exists")
             
@@ -43,6 +53,8 @@ class SessionManager:
             cls._config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
 
             cls._session = zenoh.open(cls._config)
+            logger.success("Zenoh session created successfully.")
+
             return cls._session
 
     @classmethod
@@ -50,7 +62,7 @@ class SessionManager:
         """
         Return the existing Zenoh session, or create it if it doesn't exist.
         """
-        with cls._lock:            
+        with cls._rlock:            
             if cls._session is None:
                 # Create session using create_session
                 cls.create_session()
@@ -62,7 +74,7 @@ class SessionManager:
         """
         Signal all nodes to stop and close the session.
         """
-        with cls._lock:
+        with cls._rlock:
             if cls._session:
                 try:
                     cls._session.close()
