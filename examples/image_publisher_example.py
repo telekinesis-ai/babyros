@@ -6,7 +6,7 @@ from babyros import node
 import time
 
 if __name__ == "__main__":
-    image_publisher = node.ImagePublisher(topic="camera/capture")
+    image_publisher = node.Publisher(topic="camera/capture", datatype="image")
     image = np.zeros((5112, 3840, 3), dtype=np.uint8)
 
     print("Publishing... Press Ctrl+C to stop.")

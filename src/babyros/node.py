@@ -3,11 +3,12 @@ Core module definining BabyROS publisher, subscriber, server and client.
 """
 import threading
 import json
+import time
 import struct
 import numpy as np
 import zenoh
 from loguru import logger
-
+from babyros.serializer import serialize_json, serialize_image, deserialize_image, deserialize_json
 
 class SessionManager:
     """
@@ -87,47 +88,13 @@ class SessionManager:
                 logger.warning("No session to delete.")
 
 
-class Subscriber:
-    """
-    BabyROS Subscriber class (based on Zenoh Subscriber) for receiving messages from a topic.
-    """
-    def __init__(self, topic, callback):
-        self._topic = topic
-        self._callback = callback
-        self._session = SessionManager.get_session()
-        
-        # Zenoh-native: background thread starts here
-        self._sub = self._session.declare_subscriber(self._topic, self._callback_wrapper)
-
-    def _callback_wrapper(self, sample):
-        # Zenoh native deserialization (handles JSON/ZBytes)
-        data = self._deserialize(sample)
-        self._callback(data)
-
-    def _deserialize(self, sample):
-        """
-        Deserialize Zenoh sample payload into Python data structure.
-        """
-        try:
-            deserialized_data = json.loads(sample.payload.to_string())
-            return deserialized_data
-        except Exception as e:
-            raise ValueError(f"Failed to deserialize data: {e}") from e
-
-    def delete(self):
-        """
-        Cleanly delete subscriber.
-        """
-        self._sub.undeclare()
-        logger.info(f"Subscriber on topic '{self._topic}' deleted.")
-
-
 class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
-    def __init__(self, topic):
+    def __init__(self, topic, datatype="json"):
         self._topic = topic
+        self._datatype = datatype
         self._session = SessionManager.get_session()
         self._pub = self._session.declare_publisher(self._topic)
 
@@ -136,8 +103,14 @@ class Publisher:
         Publish data to the Zenoh topic.
         """
         # Zenoh native serialization
-        serialized_data = self._serialize(data)
-        self._pub.put(serialized_data)
+        if self._datatype == "json":
+            payload, attachment = serialize_json(data)
+        elif self._datatype == "image":
+            payload, attachment = serialize_image(data)
+        else:
+            raise ValueError("Failed to serialize data. Parameter datatype has to be json or image.")
+        
+        self._pub.put(payload=payload, attachment=attachment)
 
     def _serialize(self, data):
         """
@@ -157,6 +130,89 @@ class Publisher:
         logger.info(f"Publisher on topic '{self._topic}' deleted.")
 
 
+class Subscriber:
+    """
+    Advanced BabyROS Subscriber node.
+    """
+    def __init__(self,
+                 topic, 
+                 callback, 
+                 history="keep_last",
+                 depth=1
+        ):
+        self._topic = topic
+        self._callback = callback
+        self._session = SessionManager.get_session()
+        self._running = True
+
+        if history not in ("keep_last", "keep_all"):
+            raise ValueError("history must be 'keep_last' or 'keep_all'")
+
+        if depth < 1:
+            raise ValueError("depth must be >= 1")
+
+        if history == "keep_last":
+            channel = zenoh.handlers.RingChannel(depth)
+            self._depth = depth
+        else:  # keep_all
+            channel = zenoh.handlers.FifoChannel()
+            self._depth = None  # not meaningful
+
+        self._history = history
+
+        self._sub = self._session.declare_subscriber(self._topic, channel)
+
+        self._callback_worker = threading.Thread(target=self._callback_loop, daemon=True)
+        self._callback_worker.start()
+
+    def _callback_loop(self):
+        handler = self._sub.handler
+
+        while self._running:
+            sample = handler.try_recv()
+
+            if sample is None:
+                # 1ms polling
+                time.sleep(0.001)
+                continue
+            
+            attachment = sample.attachment.to_bytes()
+            payload = sample.payload.to_bytes()
+
+            if attachment[:3] == b"IMG":
+                data = deserialize_image(payload, attachment)
+            elif attachment == b"JSON":
+                data = deserialize_json(payload)
+            else:
+                raise ValueError("Attachment unrecognized!")
+
+            try:
+                self._callback(data)
+            except Exception as e:
+                logger.error(f"Callback error on {self._topic}: {e}")
+
+    def _deserialize(self, sample):
+        try:
+            return json.loads(sample.payload.to_string())
+        except Exception as e:
+            logger.error(f"Deserialization error: {e}")
+            return None
+
+    def delete(self):
+        """Cleanly shut down the subscriber and wait for the worker."""
+        logger.info(f"Deleting AdvancedSubscriber on '{self._topic}'...")
+        self._running = False
+        
+        # Wait for the worker thread to finish its last loop
+        if self._callback_worker.is_alive():
+            self._callback_worker.join(timeout=1.0)
+            
+        # Unsubscribe from the network
+        self._sub.undeclare()
+
+        logger.info(f"AdvancedSubscriber on '{self._topic}' deleted.")    
+
+
 class Server:
     """
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
@@ -167,10 +223,7 @@ class Server:
         self._session = SessionManager.get_session()
 
         # Note: handle_query is the standard name for the callback
-        self._queryable = self._session.declare_queryable(
-            self._topic, 
-            self._handle_request
-        )
+        self._queryable = self._session.declare_queryable(self._topic, self._handle_request)
 
     def _serialize(self, data):
         """
@@ -222,6 +275,7 @@ class Server:
         self._queryable.undeclare()
         logger.info(f"Server on topic '{self._topic}' deleted.")
 
+
 class Client:
     """
     BabyROS Client based on Zenoh queries.
@@ -272,58 +326,3 @@ class Client:
         """
         self._querier.undeclare()
         logger.info(f"Client for topic '{self._topic}' deleted.")
-
-
-class ImagePublisher:
-    """
-    Image Publisher for Zenoh.
-    """
-    def __init__(self, topic):
-        self._topic = topic
-        self._session = SessionManager.get_session()
-        self._pub = self._session.declare_publisher(self._topic)
-
-    def publish(self, image):
-        """
-        Publish an image to the topic.
-        """
-        h, w, c = image.shape
-        # Pack metadata into a small byte string
-        meta = struct.pack('iii', h, w, c)
-        
-        # Put the raw image, but attach the metadata separately
-        # No concatenation = No memory copy
-        self._pub.put(image.tobytes(), attachment=meta)
-    
-    def delete(self):
-        """
-        Cleanly delete publisher.
-        """
-        self._pub.undeclare()
-        logger.info(f"ImagePublisher on topic '{self._topic}' deleted.")
-
-
-class ImageSubscriber:
-    """
-    Image Subscriber for Zenoh.
-    """
-    def __init__(self, topic, callback):
-        self._topic = topic
-        self._callback = callback
-        self._session = SessionManager.get_session()
-        self._sub = self._session.declare_subscriber(self._topic, self._callback_wrapper)
-
-    def _callback_wrapper(self, sample):
-        # Extract dimensions from the attachment (12 bytes)
-        h, w, c = struct.unpack('iii', sample.attachment.to_bytes())
-        
-        # Map the payload directly to an array (Zero-Copy)
-        image = np.frombuffer(sample.payload.to_bytes(), dtype=np.uint8).reshape((h, w, c))
-        self._callback(image)
-
-    def delete(self):
-        """
-        Cleanly delete subscriber.
-        """
-        self._sub.undeclare()
-        logger.info(f"ImageSubscriber on topic '{self._topic}' deleted.")

@@ -28,7 +28,7 @@ def process_image(image):
         print(f"Received image: {image.shape} | Delta Time: {elapsed:.4f}s | {1/elapsed:.1f} FPS")
 
 if __name__ == "__main__":
-    image_subscriber = node.ImageSubscriber(topic="camera/capture", callback=process_image)
+    image_subscriber = node.Subscriber(topic="camera/capture", callback=process_image)
     
     print("Subscriber active. Listening for 'camera/capture'...")
     print("Press Ctrl+C to exit.")

@@ -1,13 +1,22 @@
+"""
+Zenoh Subscriber Example
+"""
 import time
 from babyros import node
 
-
-def slow_log_imu(msg):
+# Define what to do when data arrives
+def log_imu(msg):
+    """
+    Callback function to log IMU data.
+    """
     print(f"Received IMU data: Seq {msg['seq']} | Accel: {msg['acceleration']}")
-    # time.sleep(3)
+
+    # Emulate lag
+    time.sleep(5)
+
 
 if __name__ == "__main__":
-    adv_sub = node.Subscriber(topic="imu", callback=slow_log_imu)
+    sub = node.SimpleSubscriber(topic="imu", callback=log_imu)
     print("Created subscriber successfully!")
 
     # Keep the script alive for 5 seconds
@@ -19,7 +28,7 @@ if __name__ == "__main__":
         print("\n[Subscriber] Interrupted by user.")
     finally:
         # CRITICAL: Close the Zenoh session gracefully
-        adv_sub.delete()  # Cleanly delete the subscriber
+        sub.delete()  # Cleanly delete the subscriber
         node.SessionManager.delete()
         print("Complete subscriber_example successfully!")
 
