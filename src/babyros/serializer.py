@@ -1,73 +1,66 @@
+"""
+Creates a Zenoh-compatible payload and attachment from a Python object.
+"""
 import json
 import struct
 import numpy as np
-import zenoh
-from typing import Any, Dict, Tuple
-
-# --- SERIALIZERS ---
-
-def serialize_json(data: Dict[str, Any]) -> Tuple[bytes, bytes]:
-    try:
-        payload = json.dumps(data).encode("utf-8")
-        attachment = b"JSON"  # type tag
-        return payload, attachment
-    except Exception as e:
-        raise ValueError(f"Failed to serialize JSON: {e}")
+from typing import Any, Dict, Callable
 
 
-def serialize_image(image: np.ndarray) -> Tuple[bytes, bytes]:
-    """
-    Serialize 3D numpy image array to bytes with a self-describing attachment.
-    Attachment format: b"IMG" + 3 ints (H, W, C) + 10-byte dtype
-    """
-    try:
-        if image.ndim != 3:
-            raise ValueError("Expected 3D image array (H, W, C)")
-        h, w, c = image.shape
-        dtype_bytes = str(image.dtype).encode("utf-8").ljust(10, b"\0")
-        attachment = b"IMG" + struct.pack("iii", h, w, c) + dtype_bytes
-        payload = image.tobytes()
-        return payload, attachment
-    except Exception as e:
-        raise ValueError(f"Failed to serialize image: {e}")
+class ZenohCodec:
+    def __init__(self):
+        # Maps Python types to (Tag, Serializer, Deserializer)
+        self._registry: Dict[Any, Dict[str, Callable]] = {
+            dict: {
+                "tag": b"JSON",
+                "ser": lambda d: json.dumps(d).encode("utf-8"),
+                "des": lambda p, a: json.loads(p.decode("utf-8"))
+            },
+            np.ndarray: {
+                "tag": b"IMG",
+                "ser": self._serialize_np,
+                "des": self._deserialize_np
+            }
+        }
 
+    def _serialize_np(self, arr: np.ndarray) -> bytes:
+        # We pack the metadata into the attachment later, 
+        # so this just returns the raw buffer
+        return arr.tobytes()
 
-def serialize_bytes(data: bytes) -> Tuple[bytes, bytes]:
-    try:
-        return data, b"RAW"
-    except Exception as e:
-        raise ValueError(f"Failed to serialize bytes: {e}")
-
-
-# --- DESERIALIZERS ---
-
-def deserialize_json(payload: bytes) -> Dict[str, Any]:
-    try:
-        return json.loads(payload.decode("utf-8"))
-    except Exception as e:
-        raise ValueError(f"Failed to deserialize JSON: {e}")
-
-
-def deserialize_image(payload: bytes, attachment: bytes) -> np.ndarray:
-    """
-    Deserialize image payload using self-describing attachment.
-    Expects attachment format: b"IMG" + 3 ints + 10-byte dtype
-    """
-    try:
-        if len(attachment) < 3 + 12 + 10:
-            raise ValueError("Invalid attachment for image")
-        if attachment[:3] != b"IMG":
-            raise ValueError("Attachment is not an image")
-
+    def _deserialize_np(self, payload: bytes, attachment: bytes) -> np.ndarray:
+        # Start after the 3-byte "IMG" tag
         h, w, c = struct.unpack("iii", attachment[3:15])
-        dtype_str = attachment[15:25].rstrip(b"\0").decode("utf-8")
-        return np.frombuffer(payload, dtype=dtype_str).reshape((h, w, c))
-    except Exception as e:
-        raise ValueError(f"Failed to deserialize image: {e}")
+        dtype = attachment[15:25].rstrip(b"\0").decode("utf-8")
+        return np.frombuffer(payload, dtype=dtype).reshape((h, w, c))
 
+    def encode(self, data: Any) -> tuple[bytes, bytes]:
+        """
+        Returns (payload, attachment)"""
+        t = type(data)
+        if t not in self._registry:
+            raise TypeError(f"No serializer for {t}")
+        
+        entry = self._registry[t]
+        payload = entry["ser"](data)
+        
+        # Build attachment: Tag + Optional Metadata
+        attachment = entry["tag"]
+        if t == np.ndarray:
+            h, w, c = data.shape
+            dtype_bytes = str(data.dtype).encode("utf-8").ljust(10, b"\0")
+            attachment += struct.pack("iii", h, w, c) + dtype_bytes
+            
+        return payload, attachment
 
-def deserialize_bytes(payload: bytes) -> bytes:
-    try:
-        return payload
-    except Exception as e:
-        raise ValueError(f"Failed to deserialize bytes: {e}")
+    def decode(self, payload: bytes, attachment: bytes) -> Any:
+        """
+        Decode a Zenoh payload and attachment into a Python object.
+        """
+        tag = attachment[:3] # Assuming 3-char tags for simplicity
+        if tag == b"JSO": # Handle JSON (tag was b"JSON", first 3 are JSO)
+             return self._registry[dict]["des"](payload, attachment)
+        if tag == b"IMG":
+             return self._registry[np.ndarray]["des"](payload, attachment)
+        
+        raise ValueError(f"Unknown attachment tag: {tag}")
