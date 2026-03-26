@@ -79,9 +79,6 @@ def configure(
     """
     config = zenoh.Config()
 
-    # Always set some default important parameters
-    config.insert_json5("transport/link/tx/batch_size", "1048576")  # 1MB
-    config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
 
     # Mapping kwargs to Zenoh keys
     mapping = {
@@ -155,6 +152,10 @@ def configure(
         if value is not None:
             json5_value = json.dumps(value)
             config.insert_json5(key, json5_value)
+
+    # Always set some default important parameters
+    config.insert_json5("transport/link/tx/batch_size", "1048576")  # 1MB
+    config.insert_json5("transport/link/rx/buffer_size", "209715200")  # 200MB
 
     # Set to SessionManager
     SessionManager.set_session_config(config)

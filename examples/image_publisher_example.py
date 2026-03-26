@@ -1,12 +1,12 @@
 """
 Camera server for handling image capture requests.
 """
+import time
 import numpy as np
 from babyros import node
-import time
 
 if __name__ == "__main__":
-    image_publisher = node.Publisher(topic="camera/capture", datatype="image")
+    image_publisher = node.Publisher(topic="camera/capture")
     image = np.zeros((5112, 3840, 3), dtype=np.uint8)
 
     print("Publishing... Press Ctrl+C to stop.")
