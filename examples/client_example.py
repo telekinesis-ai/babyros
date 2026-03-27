@@ -1,11 +1,15 @@
 """
 BabyROS Client Example
 """
-from babyros import node
 import json
+import babyros
 
 if __name__ == "__main__":
-    client = node.Client(topic="example/topic")
+    client = babyros.node.Client(topic="example/topic")
+
+    # Get list of topics in the session
+    topics = babyros.get_topics_in_session()
+    print("Active topics in current session:", topics)
 
     request = {"param1": "value1", "param2": "value2"}
     print(json.dumps(request))
@@ -14,9 +18,11 @@ if __name__ == "__main__":
 
     print(response)
 
-    print("Response: ", response[0]["received"])
-    print("Request: ", request)  
-    print("Equal? ", request == response[0]["received"]) 
+    if not response:
+        print("Recieved no response from server.")
+    else:
+        print("Response: ", response[0]["received"])
+        print("Request: ", request)  
+        print("Equal? ", request == response[0]["received"])
 
     client.delete()
-    node.SessionManager.delete() # This is the "Master Switch"

@@ -2,15 +2,20 @@
 Zenoh Publisher Example
 """
 import time
-from babyros import node
+import babyros
+
 
 if __name__ == "__main__":
     # The session is created automatically inside the Publisher
-    imu_pub = node.Publisher(topic="imu")
+    imu_pub = babyros.node.Publisher(topic="imu")
 
+    # Get list of topics in the session
+    topics = babyros.get_topics_in_session()
+    print("Active topics in current session:", topics)
+
+    # Start publishing
     print("Starting sensor stream... (Press Ctrl+C to stop)")
     count = 0
-    
     try:
         while True:
             data = {
@@ -30,5 +35,4 @@ if __name__ == "__main__":
     finally:
         # CRITICAL: Close the Zenoh session gracefully
         imu_pub.delete()
-        node.SessionManager.delete()
         print("[Publisher] Cleanup complete.")

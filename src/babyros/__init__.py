@@ -4,9 +4,6 @@ import zenoh
 from babyros.node import SessionManager
 
 
-import zenoh
-from .node import SessionManager  # assuming configure is in babyros/__init__.py
-
 def configure(
     adminspace_enabled=False,
     connect_endpoints=None,
@@ -159,3 +156,16 @@ def configure(
 
     # Set to SessionManager
     SessionManager.set_session_config(config)
+
+
+def get_topics_in_session() -> list[str]:
+    """
+    Get a list of all active nodes in the session.
+
+    Args:
+        None
+
+    Returns:
+        list[str]: A list of active topics.
+    """
+    return SessionManager.get_topics()

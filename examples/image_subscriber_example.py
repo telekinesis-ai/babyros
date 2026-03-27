@@ -1,10 +1,8 @@
 """
 Example of an image subscriber using BabyROS.
 """
-import numpy as np
 import time
-
-from babyros import node
+import babyros
 
 
 def process_image(image):
@@ -28,10 +26,12 @@ def process_image(image):
         print(f"Received image: {image.shape} | Delta Time: {elapsed:.4f}s | {1/elapsed:.1f} FPS")
 
 if __name__ == "__main__":
-    image_subscriber = node.Subscriber(topic="camera/capture", callback=process_image)
-    
-    print("Subscriber active. Listening for 'camera/capture'...")
+    image_subscriber = babyros.node.Subscriber(topic="camera/capture", callback=process_image)
     print("Press Ctrl+C to exit.")
+
+    # Get list of topics in the session
+    topics = babyros.get_topics_in_session()
+    print("Active topics in current session:", topics)
 
     try:
         # Keep the main thread alive while the Zenoh callback runs in the background
@@ -44,5 +44,4 @@ if __name__ == "__main__":
     finally:
         # Crucial: Close the Zenoh session/subscriber
         image_subscriber.delete()
-        node.SessionManager.delete()
         print("Cleanup complete. Goodbye!")

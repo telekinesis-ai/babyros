@@ -22,6 +22,17 @@ class SessionManager:
     _active_nodes = weakref.WeakSet()
 
     @classmethod
+    def get_topics(cls):
+        """
+        Get a list of all active nodes in the session.
+        """
+        with cls._rlock:
+            topic_list = []
+            for node in cls._active_nodes:
+                topic_list.append(node._topic)
+            return topic_list
+
+    @classmethod
     def register_node(cls, node: Union["Publisher", "Subscriber", "Server", "Client"]):
         """
         Register a new active node.

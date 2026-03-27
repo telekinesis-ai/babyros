@@ -3,10 +3,15 @@ Camera server for handling image capture requests.
 """
 import time
 import numpy as np
-from babyros import node
+import babyros
 
 if __name__ == "__main__":
-    image_publisher = node.Publisher(topic="camera/capture")
+    image_publisher = babyros.node.Publisher(topic="camera/capture")
+
+    # Get list of topics in the session
+    topics = babyros.get_topics_in_session()
+    print("Active topics in current session:", topics)
+
     image = np.zeros((5112, 3840, 3), dtype=np.uint8)
 
     print("Publishing... Press Ctrl+C to stop.")
