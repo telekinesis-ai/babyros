@@ -43,5 +43,4 @@ if __name__ == "__main__":
     finally:
         # This ensures cleanup happens even if the code crashes
         image_publisher.delete()
-        node.SessionManager.delete() # This is the "Master Switch"
         print("Cleanup complete.")
