@@ -1,0 +1,48 @@
+name: Publish Dev Build
+
+on:
+  push:
+    branches:
+      - develop
+
+jobs:
+  publish-develop:
+    name: Build and Upload Dev Artifact
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install build tools
+        run: pip install build twine tomli-w
+
+      - name: Set dev version in pyproject.toml
+        run: |
+          VERSION=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          VERSION=$(echo "$VERSION" | sed 's/\.dev[0-9]*//')
+          DEV_VERSION="${VERSION}.dev${{ github.run_number }}"
+          echo "DEV_VERSION=$DEV_VERSION" >> $GITHUB_ENV
+          echo "Building develop version $DEV_VERSION"
+
+          NEW_VER="$DEV_VERSION" python -c "
+          import os, tomllib, tomli_w
+          data = tomllib.load(open('pyproject.toml', 'rb'))
+          data['project']['version'] = os.environ['NEW_VER']
+          tomli_w.dump(data, open('pyproject.toml', 'wb'))
+          "
+
+      - name: Build package
+        run: |
+          rm -rf dist build *.egg-info
+          python -m build
+          python -m twine check dist/*
+
+      - name: Upload dev artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-dist-${{ github.run_number }}
+          path: dist/
+          retention-days: 7
