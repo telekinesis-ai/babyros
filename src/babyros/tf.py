@@ -115,7 +115,8 @@ class TFBuffer:
             _, parent, _ = self._get_closest(curr, t)
             path.append(parent)
             curr = parent
-            if curr == "world": break # Safety
+            if curr == "world": 
+                break # Safety
         return path
 
     def _get_closest(self, frame, t):

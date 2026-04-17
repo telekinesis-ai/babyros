@@ -1,7 +1,7 @@
 """
 Core module definining BabyROS publisher, subscriber, server and client.
 """
-from typing import Any, Union
+from typing import Union
 import threading
 import weakref
 import atexit
