@@ -5,6 +5,7 @@ from typing import Union
 import threading
 import weakref
 import atexit
+import time
 import zenoh
 import numpy as np
 from loguru import logger
@@ -201,6 +202,21 @@ class Publisher:
         logger.debug(f"Publisher on topic '{self._topic}' deleted.")
 
 
+class EncodedSample:
+    """
+    Undecoded sample delivered when Subscriber is created with decode=False.
+    """
+    def __init__(self, key_expr: str, timestamp: int, payload: bytes, attachment: bytes, codec):
+        self.key_expr = key_expr
+        self.timestamp = timestamp  # nanoseconds; arrival time if the publisher did not set one
+        self.payload = payload
+        self.attachment = attachment
+        self._codec = codec
+
+    def decode(self):
+        return self._codec.decode(self.payload, self.attachment)
+
+
 class Subscriber:
     """
     BabyROS Subscriber node.
@@ -209,7 +225,8 @@ class Subscriber:
                  topic: str,
                  callback: callable,
                  history: str = "keep_last",
-                 depth: int = 1
+                 depth: int = 1,
+                 decode: bool = True,
         ):
         """
         Initialize the subscriber.
@@ -219,6 +236,8 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
+            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedSample 
+            with "undecoded" payload and attachment. Default is True.
 
         Returns:
             None
@@ -242,6 +261,7 @@ class Subscriber:
         self._callback = callback
         self._history = history
         self._depth = depth
+        self._decode = decode
 
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
@@ -278,12 +298,19 @@ class Subscriber:
                 break
 
             try:
-                # Convert Zenoh buffers to standard bytes
                 payload = sample.payload.to_bytes()
-                attachment = sample.attachment.to_bytes()
+                attachment = sample.attachment.to_bytes() if sample.attachment is not None else b""
 
-                # Let the codec handle the logic based on the attachment tag
-                data = self._codec.decode(payload, attachment)
+                if not self._decode:
+                    ts_ns = time.time_ns()
+                    if sample.timestamp is not None:
+                        try:
+                            ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
+                        except Exception:
+                            pass
+                    data = EncodedSample(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
+                else:
+                    data = self._codec.decode(payload, attachment)
             except Exception as e:
                 logger.error(f"Failed to decode message on topic '{self._topic}': {e}")
                 continue
