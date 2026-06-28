@@ -4,8 +4,7 @@ Zenoh Server Example with Telekinesis datatype request/response
 
 import time
 import babyros
-from datatypes import datatypes
-
+from telekinesis import datatypes
 
 def handle_request(request: datatypes.Bool | None) -> datatypes.Bool:
     if request is None:
@@ -17,7 +16,8 @@ def handle_request(request: datatypes.Bool | None) -> datatypes.Bool:
 
 
 if __name__ == "__main__":
-    server = babyros.node.Server("example/topic", handle_request)
+    # compression: "lz4" (default), "zstd", or None for no compression at IPC level
+    server = babyros.node.Server("example/topic", handle_request, compression="zstd")
     print("Server started successfully!")
 
     topics = babyros.get_topics_in_session()

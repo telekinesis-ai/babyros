@@ -4,13 +4,27 @@ Creates a Zenoh-compatible payload and attachment from a Python object.
 from typing import Any, Dict, List
 import json
 
-from datatypes import datatypes, serializer
+from telekinesis import datatypes
+from telekinesis.datatypes import serializer
 
 
 class ZenohCodec:
     """Encodes and decodes Python objects for Zenoh transport."""
 
-    def __init__(self):
+    def __init__(self, compression: str | None = "lz4"):
+        """Create a codec.
+
+        Args:
+            compression: Arrow IPC-level codec passed to
+                `telekinesis.datatypes.serializer.serialize` for every
+                datatype payload. ``"lz4"`` (default) or ``"zstd"`` shrink
+                the payload at CPU cost — pick these for bandwidth-limited
+                links. ``None`` disables IPC compression, which is faster
+                end-to-end on localhost / fast LANs. Decoding needs no
+                matching setting; the reader detects the codec from the
+                stream.
+        """
+        self._compression = compression
         self._registry: List[Dict[str, Any]] = [
             {
                 "pred": lambda d: (
@@ -19,13 +33,15 @@ class ZenohCodec:
                     and all(isinstance(v, datatypes.BaseDataType) for v in d.values())
                 ),
                 "tag": b"DTD", # Datatype Dict
-                "ser": lambda d: serializer.serialize(*d.values(), names=list(d.keys())),
+                "ser": lambda d: serializer.serialize(
+                    *d.values(), names=list(d.keys()), compression=self._compression
+                ),
                 "des": lambda p, _: serializer.deserialize(p),
             },
             {
                 "pred": lambda d: isinstance(d, datatypes.BaseDataType),
                 "tag": b"DTO", # Datatype Object
-                "ser": serializer.serialize,
+                "ser": lambda d: serializer.serialize(d, compression=self._compression),
                 "des": lambda p, _: next(iter(serializer.deserialize(p).values())),
             },
             {
@@ -34,7 +50,7 @@ class ZenohCodec:
                     and all(isinstance(x, datatypes.BaseDataType) for x in d)
                 ),
                 "tag": b"DTS", # Datatype Sequence
-                "ser": lambda d: serializer.serialize(*d),
+                "ser": lambda d: serializer.serialize(*d, compression=self._compression),
                 "des": lambda p, _: list(serializer.deserialize(p).values()),
             },
             {

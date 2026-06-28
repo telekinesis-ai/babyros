@@ -10,6 +10,7 @@ import zenoh
 import numpy as np
 from loguru import logger
 from babyros import serializer
+from telekinesis.datatypes import EncodedMessage
 
 
 class SessionManager:
@@ -141,13 +142,18 @@ class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
-    def __init__(self, topic: str):
+    def __init__(self, topic: str, compression: str | None = "lz4"):
         """
         Initialize the BabyROS Publisher.
 
         Args:
             topic (str): The topic to publish to.
-            datatype (str): The data type of the messages ("json" or "image"). Default is "json".
+            compression (str | None): Arrow IPC-level payload compression.
+                "lz4" (default) or "zstd" shrink the payload at CPU cost —
+                pick these for bandwidth-limited links. None disables it,
+                which is faster end-to-end on localhost / fast LANs where
+                the transport is not the bottleneck. Subscribers need no
+                matching setting; the codec is detected from the stream.
 
         Returns:
             None
@@ -157,7 +163,7 @@ class Publisher:
         """
         if not isinstance(topic, str) or not topic:
             raise ValueError("Invalid topic: topic must be a non-empty string.")
-        
+
         if topic[0] == "/":
             raise ValueError("Topic names should not start with '/'.")
 
@@ -165,7 +171,7 @@ class Publisher:
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._pub = self._session.declare_publisher(self._topic)
 
     def publish(self, data: Union[dict, np.ndarray]):
@@ -202,21 +208,6 @@ class Publisher:
         logger.debug(f"Publisher on topic '{self._topic}' deleted.")
 
 
-class EncodedSample:
-    """
-    Undecoded sample delivered when Subscriber is created with decode=False.
-    """
-    def __init__(self, key_expr: str, timestamp: int, payload: bytes, attachment: bytes, codec):
-        self.key_expr = key_expr
-        self.timestamp = timestamp  # nanoseconds; arrival time if the publisher did not set one
-        self.payload = payload
-        self.attachment = attachment
-        self._codec = codec
-
-    def decode(self):
-        return self._codec.decode(self.payload, self.attachment)
-
-
 class Subscriber:
     """
     BabyROS Subscriber node.
@@ -236,7 +227,7 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
-            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedSample 
+            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedMessage 
             with "undecoded" payload and attachment. Default is True.
 
         Returns:
@@ -308,7 +299,7 @@ class Subscriber:
                             ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
                         except Exception:
                             pass
-                    data = EncodedSample(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
+                    data = EncodedMessage(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
                 else:
                     data = self._codec.decode(payload, attachment)
             except Exception as e:
@@ -361,13 +352,19 @@ class Server:
     """
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
-    def __init__(self, topic: str, callback: callable):
+    def __init__(self, topic: str, callback: callable, compression: str | None = "lz4"):
         """
         Initialize the BabyROS Server.
 
         Args:
             topic (str): The topic to subscribe to.
             callback (callable): The callback function to handle incoming requests.
+            compression (str | None): Arrow IPC-level compression for reply
+                payloads. "lz4" (default) or "zstd" shrink the payload at CPU
+                cost — pick these for bandwidth-limited links. None disables
+                it, which is faster end-to-end on localhost / fast LANs.
+                Clients need no matching setting; the codec is detected from
+                the stream.
 
         Returns:
             None
@@ -381,11 +378,11 @@ class Server:
             raise ValueError("Topic names should not start with '/'.")
         if not callable(callback):
             raise ValueError("Invalid callback: callback must be a callable.")
-        
+
         self._topic = topic
         self._callback = callback # Callback should expect 'request_data'
         self._deleted = False
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
 
@@ -447,7 +444,8 @@ class Client:
     BabyROS Client based on Zenoh queries.
     """
 
-    def __init__(self, topic: str, timeout: Union[float, None] = None):
+    def __init__(self, topic: str, timeout: Union[float, None] = None,
+                 compression: str | None = "lz4"):
         """
         Initialize the BabyROS Client.
 
@@ -458,6 +456,12 @@ class Client:
                 Zenoh's own default (the 'queries_default_timeout' config,
                 ~10s unless changed via babyros.configure()). Pass a smaller
                 value for bounded real-time requests.
+            compression (str | None): Arrow IPC-level compression for request
+                payloads. "lz4" (default) or "zstd" shrink the payload at CPU
+                cost — pick these for bandwidth-limited links. None disables
+                it, which is faster end-to-end on localhost / fast LANs.
+                Servers need no matching setting; the codec is detected from
+                the stream.
 
         Returns:
             None
@@ -475,7 +479,7 @@ class Client:
         self._topic = topic
         self._timeout = timeout
         self._deleted = False
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
 

@@ -3,14 +3,18 @@ Zenoh Subscriber Example with Telekinesis datatype message
 """
 import time
 import babyros
-from datatypes import datatypes
 
-
-def log_bool(msg: datatypes.Bool):
-    print(f"Received: {msg}")
+def log_data(msg):
+    """Handle received datatype messages (dict or single datatype)."""
+    if isinstance(msg, dict):
+        print(f"Received dict with keys: {list(msg.keys())}")
+        for key, value in msg.items():
+            print(f"  {key}: {value}")
+    else:
+        print(f"Received: {msg}")
 
 if __name__ == "__main__":
-    sub = babyros.node.Subscriber(topic="imu", callback=log_bool)
+    sub = babyros.node.Subscriber(topic="imu", callback=log_data)
     print("Created subscriber successfully!")
 
     # Get list of topics in the session
