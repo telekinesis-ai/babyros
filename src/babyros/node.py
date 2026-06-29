@@ -19,6 +19,12 @@ class SessionManager:
     _rlock = threading.RLock()
     _config = zenoh.Config()  # Default config, can be overridden by user using set_session_config
     _active_nodes = weakref.WeakSet()
+    _verbose = False
+
+    @classmethod
+    def set_verbose(cls, verbose: bool) -> None:
+        """Enable or disable DEBUG/INFO logging for the session manager."""
+        cls._verbose = verbose
 
     @classmethod
     def get_topics(cls):
@@ -58,7 +64,8 @@ class SessionManager:
                 raise RuntimeError("Cannot set config after session has been created. Ensure that 'babyros.configure()' is called before creating any nodes.")
             if config is not None:
                 cls._config = config
-                logger.debug("Overwritten default session config with user config.")
+                if cls._verbose:
+                    logger.debug("Overwritten default session config with user config.")
 
     @classmethod
     def get_session_config(cls):
@@ -79,7 +86,8 @@ class SessionManager:
                 raise RuntimeError("Session already exists")
         
             cls._session = zenoh.open(cls._config)
-            logger.debug("Zenoh session created successfully.")
+            if cls._verbose:
+                logger.debug("Zenoh session created successfully.")
 
             return cls._session
 
@@ -114,9 +122,10 @@ class SessionManager:
                         f"Cannot delete session: {len(cls._active_nodes)} active node(s) still exist."
                     )
 
-                logger.warning(
-                    f"Force-deleting {len(cls._active_nodes)} active node(s)..."
-                )
+                if cls._verbose:
+                    logger.warning(
+                        f"Force-deleting {len(cls._active_nodes)} active node(s)..."
+                    )
 
                 # Copy to avoid mutation during iteration
                 nodes = list(cls._active_nodes)
@@ -129,7 +138,8 @@ class SessionManager:
 
             try:
                 cls._session.close()
-                logger.debug("Zenoh session closed successfully.")
+                if cls._verbose:
+                    logger.debug("Zenoh session closed successfully.")
             except Exception as e:
                 logger.error(f"Warning: Error closing session: {e}")
             finally:
@@ -140,13 +150,13 @@ class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
-    def __init__(self, topic: str):
+    def __init__(self, topic: str, verbose: bool = False):
         """
         Initialize the BabyROS Publisher.
 
         Args:
             topic (str): The topic to publish to.
-            datatype (str): The data type of the messages ("json" or "image"). Default is "json".
+            verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
             None
@@ -156,11 +166,12 @@ class Publisher:
         """
         if not isinstance(topic, str) or not topic:
             raise ValueError("Invalid topic: topic must be a non-empty string.")
-        
+
         if topic[0] == "/":
             raise ValueError("Topic names should not start with '/'.")
 
         self._topic = topic
+        self._verbose = verbose
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
@@ -198,7 +209,8 @@ class Publisher:
         self._deleted = True
         self._pub.undeclare()
         SessionManager.unregister_node(self)
-        logger.debug(f"Publisher on topic '{self._topic}' deleted.")
+        if self._verbose:
+            logger.debug(f"Publisher on topic '{self._topic}' deleted.")
 
 
 class Subscriber:
@@ -209,7 +221,8 @@ class Subscriber:
                  topic: str,
                  callback: callable,
                  history: str = "keep_last",
-                 depth: int = 1
+                 depth: int = 1,
+                 verbose: bool = False
         ):
         """
         Initialize the subscriber.
@@ -219,6 +232,7 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
+            verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
             None
@@ -236,9 +250,10 @@ class Subscriber:
             raise ValueError("history must be 'keep_last' or 'keep_all'")
         if not isinstance(depth, int) or depth < 1:
             raise ValueError("depth must be int >= 1")
-        
+
         # Populate members
         self._topic = topic
+        self._verbose = verbose
         self._callback = callback
         self._history = history
         self._depth = depth
@@ -327,20 +342,22 @@ class Subscriber:
                 )
 
         SessionManager.unregister_node(self)
-        logger.debug(f"Subscriber on '{self._topic}' deleted.")
+        if self._verbose:
+            logger.debug(f"Subscriber on '{self._topic}' deleted.")
 
 
 class Server:
     """
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
-    def __init__(self, topic: str, callback: callable):
+    def __init__(self, topic: str, callback: callable, verbose: bool = False):
         """
         Initialize the BabyROS Server.
 
         Args:
             topic (str): The topic to subscribe to.
             callback (callable): The callback function to handle incoming requests.
+            verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
             None
@@ -354,9 +371,10 @@ class Server:
             raise ValueError("Topic names should not start with '/'.")
         if not callable(callback):
             raise ValueError("Invalid callback: callback must be a callable.")
-        
+
         self._topic = topic
-        self._callback = callback # Callback should expect 'request_data'
+        self._verbose = verbose
+        self._callback = callback
         self._deleted = False
         self._codec = serializer.ZenohCodec()
         self._session = SessionManager.get_session()
@@ -369,8 +387,8 @@ class Server:
         """
         Handle a client request using Zenoh query/reply correctly.
         """
-        # Per-request: keep at DEBUG so high request rates don't flood logs.
-        logger.debug(f"Received request on '{query.selector}'")
+        if self._verbose:
+            logger.debug(f"Received request on '{query.selector}'")
 
         try:
             request_data = None
@@ -412,7 +430,8 @@ class Server:
         self._deleted = True
         self._queryable.undeclare()
         SessionManager.unregister_node(self)
-        logger.debug(f"Server on topic '{self._topic}' deleted.")
+        if self._verbose:
+            logger.debug(f"Server on topic '{self._topic}' deleted.")
 
 
 class Client:
@@ -420,7 +439,7 @@ class Client:
     BabyROS Client based on Zenoh queries.
     """
 
-    def __init__(self, topic: str, timeout: Union[float, None] = None):
+    def __init__(self, topic: str, timeout: Union[float, None] = None, verbose: bool = False):
         """
         Initialize the BabyROS Client.
 
@@ -431,6 +450,7 @@ class Client:
                 Zenoh's own default (the 'queries_default_timeout' config,
                 ~10s unless changed via babyros.configure()). Pass a smaller
                 value for bounded real-time requests.
+            verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
             None
@@ -446,6 +466,7 @@ class Client:
             raise ValueError("timeout must be a positive number (seconds).")
 
         self._topic = topic
+        self._verbose = verbose
         self._timeout = timeout
         self._deleted = False
         self._codec = serializer.ZenohCodec()
@@ -522,7 +543,8 @@ class Client:
         self._deleted = True
         self._querier.undeclare()
         SessionManager.unregister_node(self)
-        logger.debug(f"Client for topic '{self._topic}' deleted.")
+        if self._verbose:
+            logger.debug(f"Client for topic '{self._topic}' deleted.")
 
 
 def _cleanup():

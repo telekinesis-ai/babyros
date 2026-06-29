@@ -69,6 +69,20 @@ python examples/subscriber_example.py
 
 When testing is done, kill terminal with `Ctrl+C`.
 
+## Logging
+
+BabyROS uses [loguru](https://github.com/Delgan/loguru) internally. By default, warnings and errors are always visible. DEBUG and INFO messages are hidden unless your application configures loguru to show them.
+
+To enable babyros DEBUG/INFO logs without affecting other libraries:
+
+```python
+import sys
+from loguru import logger
+logger.remove()
+logger.add(sys.stderr, level="WARNING")                   # default for everything
+logger.add(sys.stderr, level="DEBUG", filter="babyros")  # babyros only
+```
+
 ## Open Issues
 - Datatype information  
 - Safety checks
