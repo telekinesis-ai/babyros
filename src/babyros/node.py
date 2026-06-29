@@ -122,10 +122,9 @@ class SessionManager:
                         f"Cannot delete session: {len(cls._active_nodes)} active node(s) still exist."
                     )
 
-                if cls._verbose:
-                    logger.warning(
-                        f"Force-deleting {len(cls._active_nodes)} active node(s)..."
-                    )
+                logger.warning(
+                    f"Force-deleting {len(cls._active_nodes)} active node(s)..."
+                )
 
                 # Copy to avoid mutation during iteration
                 nodes = list(cls._active_nodes)
