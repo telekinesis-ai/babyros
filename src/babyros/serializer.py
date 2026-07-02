@@ -1,10 +1,14 @@
 """
 Creates a Zenoh-compatible payload and attachment from a Python object.
 """
+from typing import Any, Dict, Callable
 import json
 import struct
+
 import numpy as np
-from typing import Any, Dict, Callable
+
+
+_LEGACY_IMAGE_METADATA_SIZE = 22
 
 
 class ZenohCodec:
@@ -24,14 +28,29 @@ class ZenohCodec:
         }
 
     def _serialize_np(self, arr: np.ndarray) -> bytes:
-        # We pack the metadata into the attachment later, 
-        # so this just returns the raw buffer
-        return arr.tobytes()
+        return np.ascontiguousarray(arr).tobytes()
 
     def _deserialize_np(self, payload: bytes, attachment: bytes) -> np.ndarray:
-        # Start after the 3-byte "IMG" tag
-        h, w, c = struct.unpack("iii", attachment[3:15])
-        dtype = attachment[15:25].rstrip(b"\0").decode("utf-8")
+        metadata = attachment[3:]
+
+        if metadata.startswith(b"{"):
+            header = json.loads(metadata.decode("utf-8"))
+            dtype = np.dtype(header["dtype"])
+            shape = tuple(header["shape"])
+            expected_size = int(np.prod(shape, dtype=np.int64)) * dtype.itemsize
+            if len(payload) != expected_size:
+                raise ValueError(
+                    "Image payload size does not match attachment metadata."
+                )
+            return np.frombuffer(payload, dtype=dtype).reshape(shape)
+
+        # Backward compatibility for the original fixed-width attachment:
+        # b"IMG" + struct.pack("iii", h, w, c) + dtype_name.ljust(10, b"\0")
+        if len(metadata) < _LEGACY_IMAGE_METADATA_SIZE:
+            raise ValueError("Invalid image attachment metadata.")
+
+        h, w, c = struct.unpack("iii", metadata[:12])
+        dtype = metadata[12:22].rstrip(b"\0").decode("utf-8")
         return np.frombuffer(payload, dtype=dtype).reshape((h, w, c))
 
     def encode(self, data: Any) -> tuple[bytes, bytes]:
@@ -40,16 +59,26 @@ class ZenohCodec:
         t = type(data)
         if t not in self._registry:
             raise TypeError(f"No serializer for {t}")
+
+        if t == np.ndarray:
+            if data.dtype.hasobject:
+                raise TypeError("Object dtype arrays cannot be serialized safely.")
+
+            metadata = {
+                "shape": data.shape,
+                "dtype": data.dtype.str,
+            }
+            attachment = self._registry[t]["tag"] + json.dumps(
+                metadata,
+                separators=(",", ":")
+            ).encode("utf-8")
+            return np.ascontiguousarray(data).tobytes(), attachment
         
         entry = self._registry[t]
         payload = entry["ser"](data)
         
         # Build attachment: Tag + Optional Metadata
         attachment = entry["tag"]
-        if t == np.ndarray:
-            h, w, c = data.shape
-            dtype_bytes = str(data.dtype).encode("utf-8").ljust(10, b"\0")
-            attachment += struct.pack("iii", h, w, c) + dtype_bytes
             
         return payload, attachment
 
