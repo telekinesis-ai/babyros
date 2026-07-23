@@ -6,10 +6,12 @@ from typing import Union
 import threading
 import weakref
 import atexit
+import time
 import zenoh
 import numpy as np
 from loguru import logger
 from babyros import serializer
+from telekinesis.datatypes import EncodedMessage
 
 
 class SessionManager:
@@ -159,12 +161,18 @@ class Publisher:
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
 
-    def __init__(self, topic: str, verbose: bool = False):
+    def __init__(self, topic: str, compression: str | None = "lz4", verbose: bool = False):
         """
         Initialize the BabyROS Publisher.
 
         Args:
             topic (str): The topic to publish to.
+            compression (str | None): Arrow IPC-level payload compression.
+                "lz4" (default) or "zstd" shrink the payload at CPU cost —
+                pick these for bandwidth-limited links. None disables it,
+                which is faster end-to-end on localhost / fast LANs where
+                the transport is not the bottleneck. Subscribers need no
+                matching setting; the codec is detected from the stream.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -184,7 +192,7 @@ class Publisher:
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._pub = self._session.declare_publisher(self._topic)
 
     def publish(self, data: Union[dict, np.ndarray]):
@@ -233,6 +241,7 @@ class Subscriber:
         callback: callable,
         history: str = "keep_last",
         depth: int = 1,
+        decode: bool = True,
         verbose: bool = False,
     ):
         """
@@ -243,6 +252,8 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
+            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedMessage 
+            with "undecoded" payload and attachment. Default is True.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -268,6 +279,7 @@ class Subscriber:
         self._callback = callback
         self._history = history
         self._depth = depth
+        self._decode = decode
 
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
@@ -306,12 +318,19 @@ class Subscriber:
                 break
 
             try:
-                # Convert Zenoh buffers to standard bytes
                 payload = sample.payload.to_bytes()
-                attachment = sample.attachment.to_bytes()
+                attachment = sample.attachment.to_bytes() if sample.attachment is not None else b""
 
-                # Let the codec handle the logic based on the attachment tag
-                data = self._codec.decode(payload, attachment)
+                if not self._decode:
+                    ts_ns = time.time_ns()
+                    if sample.timestamp is not None:
+                        try:
+                            ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
+                        except Exception:
+                            pass
+                    data = EncodedMessage(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
+                else:
+                    data = self._codec.decode(payload, attachment)
             except Exception as e:
                 logger.error(f"Failed to decode message on topic '{self._topic}': {e}")
                 continue
@@ -364,13 +383,19 @@ class Server:
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
 
-    def __init__(self, topic: str, callback: callable, verbose: bool = False):
+    def __init__(self, topic: str, callback: callable, compression: str | None = "lz4", verbose: bool = False):
         """
         Initialize the BabyROS Server.
 
         Args:
             topic (str): The topic to subscribe to.
             callback (callable): The callback function to handle incoming requests.
+            compression (str | None): Arrow IPC-level compression for reply
+                payloads. "lz4" (default) or "zstd" shrink the payload at CPU
+                cost — pick these for bandwidth-limited links. None disables
+                it, which is faster end-to-end on localhost / fast LANs.
+                Clients need no matching setting; the codec is detected from
+                the stream.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -390,7 +415,7 @@ class Server:
         self._verbose = verbose
         self._callback = callback
         self._deleted = False
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
 
@@ -455,7 +480,8 @@ class Client:
     """
 
     def __init__(
-        self, topic: str, timeout: Union[float, None] = None, verbose: bool = False
+        self, topic: str, timeout: Union[float, None] = None,
+                 compression: str | None = "lz4", verbose: bool = False
     ):
         """
         Initialize the BabyROS Client.
@@ -467,6 +493,12 @@ class Client:
                 Zenoh's own default (the 'queries_default_timeout' config,
                 ~10s unless changed via babyros.configure()). Pass a smaller
                 value for bounded real-time requests.
+            compression (str | None): Arrow IPC-level compression for request
+                payloads. "lz4" (default) or "zstd" shrink the payload at CPU
+                cost — pick these for bandwidth-limited links. None disables
+                it, which is faster end-to-end on localhost / fast LANs.
+                Servers need no matching setting; the codec is detected from
+                the stream.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -488,7 +520,7 @@ class Client:
         self._verbose = verbose
         self._timeout = timeout
         self._deleted = False
-        self._codec = serializer.ZenohCodec()
+        self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
 

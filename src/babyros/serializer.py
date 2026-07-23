@@ -3,7 +3,8 @@ Creates a Zenoh-compatible payload and attachment from a Python object.
 
 Wire format (dispatched on the 4-byte tag at the start of the attachment):
 
-  JSON  - a dict with no numpy arrays. payload = UTF-8 JSON, attachment = b"JSON".
+  JSON  - a dict with no numpy arrays and no telekinesis datatypes.
+          payload = UTF-8 JSON, attachment = b"JSON".
   NDAR  - a bare np.ndarray of any shape/dtype. payload = raw array bytes,
           attachment = b"NDAR" + JSON metadata {shape, dtype}.
   NDCT  - a dict containing one or more numpy arrays (possibly nested).
@@ -11,38 +12,82 @@ Wire format (dispatched on the 4-byte tag at the start of the attachment):
           attachment = b"NDCT" + JSON manifest describing the structure and,
           for each array, its {shape, dtype, offset, nbytes} slice of payload.
           Arrays are replaced in the structure by {"__ndarray__": <index>}.
+  DTDC  - a dict whose keys are strings and whose values are all telekinesis
+          datatypes. payload = Arrow IPC stream from serializer.serialize
+          (keyed by the dict keys), attachment = b"DTDC".
+  DTOB  - a single telekinesis datatype. payload = Arrow IPC stream,
+          attachment = b"DTOB".
+  DTSQ  - a non-empty list/tuple of telekinesis datatypes. payload = Arrow
+          IPC stream, attachment = b"DTSQ".
 
-Only arrays whose bytes round-trip through np.frombuffer are supported: plain
-numeric dtypes in native byte order. Object arrays, structured/record dtypes,
-and non-native endianness are not preserved and should not be sent.
+Only numpy arrays whose bytes round-trip through np.frombuffer are supported
+for NDAR/NDCT: plain numeric dtypes in native byte order. Object arrays,
+structured/record dtypes, and non-native endianness are not preserved and
+should not be sent.
 """
 
 import json
 import numpy as np
-from typing import Any, Dict, Callable
+from typing import Any, Callable, Dict, List, Tuple
+
+from telekinesis import datatypes
+from telekinesis.datatypes import serializer
 
 
 class ZenohCodec:
-    def __init__(self):
-        # Encode dispatch: Python type -> serializer returning (payload, attachment).
-        # A dict picks JSON or NDCT at serialize time depending on its contents.
-        self._registry: Dict[Any, Callable] = {
-            dict: self._serialize_dict,
-            np.ndarray: self._serialize_array,
-        }
+    """Encodes and decodes Python objects for Zenoh transport."""
+
+    def __init__(self, compression: str | None = "lz4"):
+        """Create a codec.
+
+        Args:
+            compression: Arrow IPC-level codec passed to
+                ``telekinesis.datatypes.serializer.serialize`` for every
+                datatype payload (DTDC/DTOB/DTSQ). ``"lz4"`` (default) or
+                ``"zstd"`` shrink the payload at CPU cost — pick these for
+                bandwidth-limited links. ``None`` disables IPC compression,
+                which is faster end-to-end on localhost / fast LANs. Decoding
+                needs no matching setting; the reader detects the codec from
+                the stream. Numpy NDAR/NDCT payloads are always sent
+                uncompressed.
+        """
+        self._compression = compression
+        # Encode dispatch: ordered (predicate, serializer) pairs; first match
+        # wins. Order matters — the telekinesis-datatype checks must come
+        # before the generic dict / numpy-container checks so a dict of
+        # datatypes is not misrouted to JSON/NDCT.
+        self._encoders: List[
+            Tuple[Callable[[Any], bool], Callable[[Any], Tuple[bytes, bytes]]]
+        ] = [
+            (self._is_datatype_dict, self._serialize_datatype_dict),
+            (
+                lambda d: isinstance(d, datatypes.BaseDataType),
+                self._serialize_datatype_object,
+            ),
+            (self._is_datatype_sequence, self._serialize_datatype_sequence),
+            (lambda d: isinstance(d, np.ndarray), self._serialize_array),
+            (
+                lambda d: isinstance(d, dict) and self._contains_ndarray(d),
+                self._serialize_container,
+            ),
+            (lambda d: isinstance(d, dict), self._serialize_json),
+        ]
         # Decode dispatch: full 4-byte tag -> deserializer(payload, attachment).
-        self._decoders: Dict[bytes, Callable] = {
+        self._decoders: Dict[bytes, Callable[[bytes, bytes], Any]] = {
             b"JSON": self._deserialize_json,  # plain dict
             b"NDAR": self._deserialize_array,  # bare ndarray
             b"NDCT": self._deserialize_container,  # dict with arrays
+            b"DTDC": self._deserialize_datatype_dict,  # dict of datatypes
+            b"DTOB": self._deserialize_datatype_object,  # single datatype
+            b"DTSQ": self._deserialize_datatype_sequence,  # sequence of datatypes
         }
 
-    def encode(self, data: Any) -> tuple[bytes, bytes]:
+    def encode(self, data: Any) -> Tuple[bytes, bytes]:
         """Returns (payload, attachment)."""
-        serializer = self._registry.get(type(data))
-        if serializer is None:
-            raise TypeError(f"No serializer for {type(data)}")
-        return serializer(data)
+        for predicate, serialize in self._encoders:
+            if predicate(data):
+                return serialize(data)
+        raise TypeError(f"No serializer for {type(data)}")
 
     def decode(self, payload: bytes, attachment: bytes) -> Any:
         """Decode a Zenoh payload and attachment into a Python object."""
@@ -50,6 +95,52 @@ class ZenohCodec:
         if deserializer is None:
             raise ValueError(f"Unknown attachment tag: {attachment[:4]}")
         return deserializer(payload, attachment)
+
+    # -- telekinesis datatypes (DTDC / DTOB / DTSQ) -----------------------
+
+    @staticmethod
+    def _is_datatype_dict(data: Any) -> bool:
+        """True for a non-empty dict with str keys and all-datatype values."""
+        return (
+            isinstance(data, dict)
+            and bool(data)
+            and all(isinstance(k, str) for k in data)
+            and all(isinstance(v, datatypes.BaseDataType) for v in data.values())
+        )
+
+    @staticmethod
+    def _is_datatype_sequence(data: Any) -> bool:
+        """True for a non-empty list/tuple whose items are all datatypes."""
+        return (
+            isinstance(data, (list, tuple))
+            and bool(data)
+            and all(isinstance(x, datatypes.BaseDataType) for x in data)
+        )
+
+    def _serialize_datatype_dict(self, data: dict) -> Tuple[bytes, bytes]:
+        payload = serializer.serialize(
+            *data.values(), names=list(data.keys()), compression=self._compression
+        )
+        return payload, b"DTDC"
+
+    def _deserialize_datatype_dict(self, payload: bytes, attachment: bytes) -> dict:
+        return serializer.deserialize(payload)
+
+    def _serialize_datatype_object(self, data: Any) -> Tuple[bytes, bytes]:
+        payload = serializer.serialize(data, compression=self._compression)
+        return payload, b"DTOB"
+
+    def _deserialize_datatype_object(self, payload: bytes, attachment: bytes) -> Any:
+        return next(iter(serializer.deserialize(payload).values()))
+
+    def _serialize_datatype_sequence(self, data) -> Tuple[bytes, bytes]:
+        payload = serializer.serialize(*data, compression=self._compression)
+        return payload, b"DTSQ"
+
+    def _deserialize_datatype_sequence(
+        self, payload: bytes, attachment: bytes
+    ) -> list:
+        return list(serializer.deserialize(payload).values())
 
     # -- helpers ----------------------------------------------------------
 
@@ -73,20 +164,18 @@ class ZenohCodec:
             return any(cls._contains_ndarray(v) for v in obj)
         return False
 
-    # -- dict: plain JSON or, when it holds arrays, the NDCT container ----
+    # -- plain dict (JSON) ------------------------------------------------
 
-    def _serialize_dict(self, data: dict) -> tuple[bytes, bytes]:
-        if self._contains_ndarray(data):
-            return self._serialize_container(data)
+    def _serialize_json(self, data: dict) -> Tuple[bytes, bytes]:
         payload = json.dumps(data, default=self._json_default).encode("utf-8")
         return payload, b"JSON"
 
     def _deserialize_json(self, payload: bytes, attachment: bytes) -> dict:
         return json.loads(payload.decode("utf-8"))
 
-    # -- bare ndarray -----------------------------------------------------
+    # -- bare ndarray (NDAR) ----------------------------------------------
 
-    def _serialize_array(self, arr: np.ndarray) -> tuple[bytes, bytes]:
+    def _serialize_array(self, arr: np.ndarray) -> Tuple[bytes, bytes]:
         arr = np.ascontiguousarray(arr)
         meta = {"shape": list(arr.shape), "dtype": str(arr.dtype)}
         attachment = b"NDAR" + json.dumps(meta).encode("utf-8")
@@ -96,14 +185,14 @@ class ZenohCodec:
         meta = json.loads(attachment[4:].decode("utf-8"))
         return np.frombuffer(payload, dtype=meta["dtype"]).reshape(meta["shape"])
 
-    # -- dict containing ndarrays (NDCT) ---------------------------------
+    # -- dict containing ndarrays (NDCT) ----------------------------------
 
-    def _serialize_container(self, data: dict) -> tuple[bytes, bytes]:
-        arrays: list[np.ndarray] = []
+    def _serialize_container(self, data: dict) -> Tuple[bytes, bytes]:
+        arrays: List[np.ndarray] = []
         structure = self._extract_arrays(data, arrays)
 
-        chunks: list[bytes] = []
-        manifest: list[dict] = []
+        chunks: List[bytes] = []
+        manifest: List[dict] = []
         offset = 0
         for arr in arrays:
             arr = np.ascontiguousarray(arr)
