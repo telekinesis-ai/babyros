@@ -2,10 +2,11 @@
 Zenoh Publisher Example
 """
 import time
+import numpy as np
+
 import babyros
 from telekinesis import datatypes
 
-import numpy as np
 
 if __name__ == "__main__":
     # The session is created automatically inside the Publisher

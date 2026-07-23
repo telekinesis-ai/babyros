@@ -2,7 +2,7 @@
 Core module definining BabyROS publisher, subscriber, server and client.
 """
 
-from typing import Union
+from typing import Union, Any
 import threading
 import weakref
 import atexit
@@ -11,7 +11,27 @@ import zenoh
 import numpy as np
 from loguru import logger
 from babyros import serializer
-from telekinesis.datatypes import EncodedMessage
+
+try:
+    from telekinesis.datatypes import EncodedMessage
+except ImportError:
+    class EncodedMessage:
+        def __init__(
+            self,
+            key_expr: str,
+            timestamp: int,
+            payload: bytes,
+            attachment: bytes,
+            codec: Any,
+        ) -> None:
+            self.key_expr = key_expr
+            self.timestamp = timestamp  # nanoseconds; arrival time if the publisher did not set one
+            self.payload = payload
+            self.attachment = attachment
+            self._codec = codec
+
+        def decode(self) -> Any:
+            return self._codec.decode(self.payload, self.attachment)
 
 
 class SessionManager:

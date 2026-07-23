@@ -7,21 +7,21 @@ Wire format (dispatched on the 4-byte tag at the start of the attachment):
           payload = UTF-8 JSON, attachment = b"JSON".
   NDAR  - a bare np.ndarray of any shape/dtype. payload = raw array bytes,
           attachment = b"NDAR" + JSON metadata {shape, dtype}.
-  NDCT  - a dict containing one or more numpy arrays (possibly nested).
+  NDDC  - a dict containing one or more numpy arrays (possibly nested).
           payload = every array's raw bytes concatenated in order,
-          attachment = b"NDCT" + JSON manifest describing the structure and,
+          attachment = b"NDDC" + JSON manifest describing the structure and,
           for each array, its {shape, dtype, offset, nbytes} slice of payload.
           Arrays are replaced in the structure by {"__ndarray__": <index>}.
-  DTDC  - a dict whose keys are strings and whose values are all telekinesis
+  TDDC  - a dict whose keys are strings and whose values are all telekinesis
           datatypes. payload = Arrow IPC stream from serializer.serialize
-          (keyed by the dict keys), attachment = b"DTDC".
-  DTOB  - a single telekinesis datatype. payload = Arrow IPC stream,
-          attachment = b"DTOB".
-  DTSQ  - a non-empty list/tuple of telekinesis datatypes. payload = Arrow
-          IPC stream, attachment = b"DTSQ".
+          (keyed by the dict keys), attachment = b"TDDC".
+  TDOB  - a single telekinesis datatype. payload = Arrow IPC stream,
+          attachment = b"TDOB".
+  TDSQ  - a non-empty list/tuple of telekinesis datatypes. payload = Arrow
+          IPC stream, attachment = b"TDSQ".
 
 Only numpy arrays whose bytes round-trip through np.frombuffer are supported
-for NDAR/NDCT: plain numeric dtypes in native byte order. Object arrays,
+for NDAR/NDDC: plain numeric dtypes in native byte order. Object arrays,
 structured/record dtypes, and non-native endianness are not preserved and
 should not be sent.
 """
@@ -30,8 +30,30 @@ import json
 import numpy as np
 from typing import Any, Callable, Dict, List, Tuple
 
-from telekinesis import datatypes
-from telekinesis.datatypes import serializer
+from loguru import logger
+
+try:
+    from telekinesis import datatypes
+    from telekinesis.datatypes import serializer
+except ImportError:
+    logger.warning(
+        "telekinesis datatypes package not found; falling back to the legacy "
+        "'datatypes' package. Telekinesis datatype serialization (TDDC/TDOB/TDSQ) "
+        "is unavailable — only plain JSON dicts and numpy arrays (NDAR/NDDC) can "
+        "be sent. New 'telekinesis-datatypes' for full functionality will be released soon."
+    )
+    from datatypes import datatypes
+    serializer = None
+    # The legacy 'datatypes' package predates BaseDataType, which the encode
+    # predicates reference. Give it an unmatchable placeholder so those
+    # predicates always return False: datatype payloads then fall through to
+    # the normal "No serializer" TypeError, and JSON + numpy keep working
+    # without any guards elsewhere in the codec.
+    if not hasattr(datatypes, "BaseDataType"):
+        class _UnavailableDataType:
+            pass
+
+        datatypes.BaseDataType = _UnavailableDataType
 
 
 class ZenohCodec:
@@ -43,19 +65,19 @@ class ZenohCodec:
         Args:
             compression: Arrow IPC-level codec passed to
                 ``telekinesis.datatypes.serializer.serialize`` for every
-                datatype payload (DTDC/DTOB/DTSQ). ``"lz4"`` (default) or
+                datatype payload (TDDC/TDOB/TDSQ). ``"lz4"`` (default) or
                 ``"zstd"`` shrink the payload at CPU cost — pick these for
                 bandwidth-limited links. ``None`` disables IPC compression,
                 which is faster end-to-end on localhost / fast LANs. Decoding
                 needs no matching setting; the reader detects the codec from
-                the stream. Numpy NDAR/NDCT payloads are always sent
+                the stream. Numpy NDAR/NDDC payloads are always sent
                 uncompressed.
         """
         self._compression = compression
         # Encode dispatch: ordered (predicate, serializer) pairs; first match
         # wins. Order matters — the telekinesis-datatype checks must come
         # before the generic dict / numpy-container checks so a dict of
-        # datatypes is not misrouted to JSON/NDCT.
+        # datatypes is not misrouted to JSON/NDDC.
         self._encoders: List[
             Tuple[Callable[[Any], bool], Callable[[Any], Tuple[bytes, bytes]]]
         ] = [
@@ -76,10 +98,10 @@ class ZenohCodec:
         self._decoders: Dict[bytes, Callable[[bytes, bytes], Any]] = {
             b"JSON": self._deserialize_json,  # plain dict
             b"NDAR": self._deserialize_array,  # bare ndarray
-            b"NDCT": self._deserialize_container,  # dict with arrays
-            b"DTDC": self._deserialize_datatype_dict,  # dict of datatypes
-            b"DTOB": self._deserialize_datatype_object,  # single datatype
-            b"DTSQ": self._deserialize_datatype_sequence,  # sequence of datatypes
+            b"NDDC": self._deserialize_container,  # dict with arrays
+            b"TDDC": self._deserialize_datatype_dict,  # dict of datatypes
+            b"TDOB": self._deserialize_datatype_object,  # single datatype
+            b"TDSQ": self._deserialize_datatype_sequence,  # sequence of datatypes
         }
 
     def encode(self, data: Any) -> Tuple[bytes, bytes]:
@@ -96,7 +118,7 @@ class ZenohCodec:
             raise ValueError(f"Unknown attachment tag: {attachment[:4]}")
         return deserializer(payload, attachment)
 
-    # -- telekinesis datatypes (DTDC / DTOB / DTSQ) -----------------------
+    # -- telekinesis datatypes (TDDC / TDOB / TDSQ) -----------------------
 
     @staticmethod
     def _is_datatype_dict(data: Any) -> bool:
@@ -121,21 +143,21 @@ class ZenohCodec:
         payload = serializer.serialize(
             *data.values(), names=list(data.keys()), compression=self._compression
         )
-        return payload, b"DTDC"
+        return payload, b"TDDC"
 
     def _deserialize_datatype_dict(self, payload: bytes, attachment: bytes) -> dict:
         return serializer.deserialize(payload)
 
     def _serialize_datatype_object(self, data: Any) -> Tuple[bytes, bytes]:
         payload = serializer.serialize(data, compression=self._compression)
-        return payload, b"DTOB"
+        return payload, b"TDOB"
 
     def _deserialize_datatype_object(self, payload: bytes, attachment: bytes) -> Any:
         return next(iter(serializer.deserialize(payload).values()))
 
     def _serialize_datatype_sequence(self, data) -> Tuple[bytes, bytes]:
         payload = serializer.serialize(*data, compression=self._compression)
-        return payload, b"DTSQ"
+        return payload, b"TDSQ"
 
     def _deserialize_datatype_sequence(
         self, payload: bytes, attachment: bytes
@@ -185,7 +207,7 @@ class ZenohCodec:
         meta = json.loads(attachment[4:].decode("utf-8"))
         return np.frombuffer(payload, dtype=meta["dtype"]).reshape(meta["shape"])
 
-    # -- dict containing ndarrays (NDCT) ----------------------------------
+    # -- dict containing ndarrays (NDDC) ----------------------------------
 
     def _serialize_container(self, data: dict) -> Tuple[bytes, bytes]:
         arrays: List[np.ndarray] = []
@@ -209,7 +231,7 @@ class ZenohCodec:
             offset += len(raw)
 
         meta = {"structure": structure, "arrays": manifest}
-        attachment = b"NDCT" + json.dumps(meta, default=self._json_default).encode(
+        attachment = b"NDDC" + json.dumps(meta, default=self._json_default).encode(
             "utf-8"
         )
         return b"".join(chunks), attachment
