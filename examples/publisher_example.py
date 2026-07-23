@@ -1,6 +1,7 @@
 """
 Zenoh Publisher Example
 """
+
 import time
 import babyros
 
@@ -21,15 +22,15 @@ if __name__ == "__main__":
             data = {
                 "acceleration": [0.1, 0.0, 9.8],
                 "gyro": [0.0, 0.01, 0.0],
-                "seq": [count]
+                "seq": [count],
             }
-            
+
             imu_pub.publish(data=data)
             print(f"Sent seq: {count}")
-            
+
             count += 1
             time.sleep(0.1)  # 10 Hz
-            
+
     except KeyboardInterrupt:
         print("\n[Publisher] Interrupted by user.")
     finally:

@@ -1,6 +1,7 @@
 """
 Core module definining BabyROS publisher, subscriber, server and client.
 """
+
 from typing import Union
 import threading
 import weakref
@@ -15,9 +16,12 @@ class SessionManager:
     """
     Manages the Zenoh session for the application.
     """
+
     _session = None
     _rlock = threading.RLock()
-    _config = zenoh.Config()  # Default config, can be overridden by user using set_session_config
+    _config = (
+        zenoh.Config()
+    )  # Default config, can be overridden by user using set_session_config
     _active_nodes = weakref.WeakSet()
     _verbose = False
 
@@ -46,7 +50,9 @@ class SessionManager:
             cls._active_nodes.add(node)
 
     @classmethod
-    def unregister_node(cls, node: Union["Publisher", "Subscriber", "Server", "Client"]):
+    def unregister_node(
+        cls, node: Union["Publisher", "Subscriber", "Server", "Client"]
+    ):
         """
         Unregister an active node.
         """
@@ -61,7 +67,9 @@ class SessionManager:
         """
         with cls._rlock:
             if cls._session is not None:
-                raise RuntimeError("Cannot set config after session has been created. Ensure that 'babyros.configure()' is called before creating any nodes.")
+                raise RuntimeError(
+                    "Cannot set config after session has been created. Ensure that 'babyros.configure()' is called before creating any nodes."
+                )
             if config is not None:
                 cls._config = config
                 if cls._verbose:
@@ -84,7 +92,7 @@ class SessionManager:
         with cls._rlock:
             if cls._session is not None:
                 raise RuntimeError("Session already exists")
-        
+
             cls._session = zenoh.open(cls._config)
             if cls._verbose:
                 logger.debug("Zenoh session created successfully.")
@@ -96,11 +104,11 @@ class SessionManager:
         """
         Return the existing Zenoh session, or create it if it doesn't exist.
         """
-        with cls._rlock:            
+        with cls._rlock:
             if cls._session is None:
                 # Create session using create_session
                 cls.create_session()
-            
+
             return cls._session
 
     @classmethod
@@ -145,10 +153,12 @@ class SessionManager:
                 cls._session = None
                 cls._active_nodes.clear()
 
+
 class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
+
     def __init__(self, topic: str, verbose: bool = False):
         """
         Initialize the BabyROS Publisher.
@@ -198,7 +208,7 @@ class Publisher:
             raise ValueError(f"Failed to serialize data: {e}") from e
 
         self._pub.put(payload=payload, attachment=attachment)
-  
+
     def delete(self):
         """
         Cleanly delete publisher.
@@ -216,13 +226,15 @@ class Subscriber:
     """
     BabyROS Subscriber node.
     """
-    def __init__(self,
-                 topic: str,
-                 callback: callable,
-                 history: str = "keep_last",
-                 depth: int = 1,
-                 verbose: bool = False
-        ):
+
+    def __init__(
+        self,
+        topic: str,
+        callback: callable,
+        history: str = "keep_last",
+        depth: int = 1,
+        verbose: bool = False,
+    ):
         """
         Initialize the subscriber.
 
@@ -271,7 +283,9 @@ class Subscriber:
 
         self._sub = self._session.declare_subscriber(self._topic, channel)
 
-        self._callback_worker = threading.Thread(target=self._callback_loop, daemon=True)
+        self._callback_worker = threading.Thread(
+            target=self._callback_loop, daemon=True
+        )
         self._callback_worker.start()
 
     def _callback_loop(self):
@@ -349,6 +363,7 @@ class Server:
     """
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
+
     def __init__(self, topic: str, callback: callable, verbose: bool = False):
         """
         Initialize the BabyROS Server.
@@ -380,8 +395,10 @@ class Server:
         SessionManager.register_node(self)
 
         # Note: handle_query is the standard name for the callback
-        self._queryable = self._session.declare_queryable(self._topic, self._handle_request)
-    
+        self._queryable = self._session.declare_queryable(
+            self._topic, self._handle_request
+        )
+
     def _handle_request(self, query):
         """
         Handle a client request using Zenoh query/reply correctly.
@@ -394,8 +411,7 @@ class Server:
             if query.payload is not None:
                 # Decode the incoming request payload using its attachment
                 request_data = self._codec.decode(
-                    query.payload.to_bytes(), 
-                    query.attachment.to_bytes()
+                    query.payload.to_bytes(), query.attachment.to_bytes()
                 )
 
             # Execute user callback to get the result
@@ -438,7 +454,9 @@ class Client:
     BabyROS Client based on Zenoh queries.
     """
 
-    def __init__(self, topic: str, timeout: Union[float, None] = None, verbose: bool = False):
+    def __init__(
+        self, topic: str, timeout: Union[float, None] = None, verbose: bool = False
+    ):
         """
         Initialize the BabyROS Client.
 
@@ -461,7 +479,9 @@ class Client:
             raise ValueError("Invalid topic: topic must be a non-empty string.")
         if topic[0] == "/":
             raise ValueError("Topic names should not start with '/'.")
-        if timeout is not None and (not isinstance(timeout, (int, float)) or timeout <= 0):
+        if timeout is not None and (
+            not isinstance(timeout, (int, float)) or timeout <= 0
+        ):
             raise ValueError("timeout must be a positive number (seconds).")
 
         self._topic = topic
@@ -493,22 +513,21 @@ class Client:
         if self._deleted:
             logger.error(f"Client for topic '{self._topic}' is already deleted.")
             raise RuntimeError("Cannot send request: Client is deleted.")
-        
+
         payload, attachment = (None, None)
         if data is not None:
             payload, attachment = self._codec.encode(data)
 
         # Perform the Zenoh GET operation
         replies = self._querier.get(payload=payload, attachment=attachment)
-        
+
         results = []
         for reply in replies:
             if reply.ok:
                 # Decode the response from the server
                 sample = reply.ok
                 decoded_val = self._codec.decode(
-                    sample.payload.to_bytes(), 
-                    sample.attachment.to_bytes()
+                    sample.payload.to_bytes(), sample.attachment.to_bytes()
                 )
                 results.append(decoded_val)
             else:
@@ -518,7 +537,9 @@ class Client:
                 # distinctly so it isn't misdiagnosed.
                 if err_msg.lower() == "timeout":
                     deadline = self._timeout if self._timeout is not None else "default"
-                    logger.warning(f"Request to '{self._topic}' timed out ({deadline}s).")
+                    logger.warning(
+                        f"Request to '{self._topic}' timed out ({deadline}s)."
+                    )
                 else:
                     logger.error(f"Server error on {self._topic}: {err_msg}")
 
@@ -551,5 +572,6 @@ def _cleanup():
         SessionManager.delete(force=True)
     except Exception as e:
         logger.error(f"Cleanup error: {e}")
+
 
 atexit.register(_cleanup)

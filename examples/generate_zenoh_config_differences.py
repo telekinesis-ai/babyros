@@ -50,7 +50,9 @@ def compare_table_md(d1, d2, filename="zenoh_config_differences.md"):
 
 if __name__ == "__main__":
     default_config = zenoh.Config()
-    ros_config = zenoh.Config.from_file("../config/DEFAULT_RMW_ZENOH_SESSION_CONFIG.json5")
+    ros_config = zenoh.Config.from_file(
+        "../config/DEFAULT_RMW_ZENOH_SESSION_CONFIG.json5"
+    )
 
     d1 = config_to_dict(default_config)
     d2 = config_to_dict(ros_config)

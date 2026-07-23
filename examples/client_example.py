@@ -1,6 +1,7 @@
 """
 BabyROS Client Example
 """
+
 import json
 import babyros
 
@@ -22,7 +23,7 @@ if __name__ == "__main__":
         print("Recieved no response from server.")
     else:
         print("Response: ", response[0]["received"])
-        print("Request: ", request)  
+        print("Request: ", request)
         print("Equal? ", request == response[0]["received"])
 
     client.delete()

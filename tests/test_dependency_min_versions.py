@@ -2,6 +2,7 @@
 Smoke test that exercises every third-party API surface used by babyros.
 Run this after installing a candidate minimum version to verify compatibility.
 """
+
 import sys
 import time
 import importlib.metadata
@@ -96,20 +97,29 @@ def check_zenoh():
     assert hasattr(reply, "err"), "reply.err not available"
     if reply.ok is not None:
         ok_bytes = reply.ok.payload.to_bytes()
-        assert isinstance(ok_bytes, (bytes, bytearray)), "reply.ok.payload.to_bytes() did not return bytes"
+        assert isinstance(ok_bytes, (bytes, bytearray)), (
+            "reply.ok.payload.to_bytes() did not return bytes"
+        )
     if reply.err is not None:
         err_str = reply.err.payload.to_string()
-        assert isinstance(err_str, str), "reply.err.payload.to_string() did not return str"
+        assert isinstance(err_str, str), (
+            "reply.err.payload.to_string() did not return str"
+        )
     querier2.undeclare()
 
     # reply_err path — a handler that always errors, verifying reply.err carries it
     def _err_handler(query):
         query.reply_err(b"boom")
-    err_queryable = session.declare_queryable("babyros/test/queryable_err", _err_handler)
+
+    err_queryable = session.declare_queryable(
+        "babyros/test/queryable_err", _err_handler
+    )
     err_querier = session.declare_querier("babyros/test/queryable_err", timeout=1.0)
     err_replies = list(err_querier.get())
     if err_replies and err_replies[0].err is not None:
-        assert err_replies[0].err.payload.to_string() == "boom", "reply_err payload roundtrip failed"
+        assert err_replies[0].err.payload.to_string() == "boom", (
+            "reply_err payload roundtrip failed"
+        )
     err_querier.undeclare()
     err_queryable.undeclare()
     queryable.undeclare()
@@ -123,10 +133,14 @@ def check_zenoh():
     sample = sub2.handler.try_recv()
     if sample is not None:
         payload_bytes = sample.payload.to_bytes()
-        assert isinstance(payload_bytes, (bytes, bytearray)), "payload.to_bytes() did not return bytes"
+        assert isinstance(payload_bytes, (bytes, bytearray)), (
+            "payload.to_bytes() did not return bytes"
+        )
         if sample.attachment is not None:
             att_bytes = sample.attachment.to_bytes()
-            assert isinstance(att_bytes, (bytes, bytearray)), "attachment.to_bytes() did not return bytes"
+            assert isinstance(att_bytes, (bytes, bytearray)), (
+                "attachment.to_bytes() did not return bytes"
+            )
     pub2.undeclare()
     sub2.undeclare()
 
