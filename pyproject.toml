@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "babyros"
-version = "0.1.4"
+version = "0.1.5"
 description = "BabyROS: baby version of ROS built on Zenoh"
 readme = "README.md"
 requires-python = ">=3.11,<3.13"
@@ -28,9 +28,9 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "eclipse-zenoh",
-    "numpy",
-    "loguru",
+    "eclipse-zenoh>=1.1.0",
+    "numpy>=1.26.0",
+    "loguru>=0.5.0",
 ]
 
 [project.optional-dependencies]

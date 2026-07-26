@@ -26,10 +26,7 @@ def handle_request(request):
         return {"message": "No request received!"}
 
     print("Correct data processesed!")
-    return {
-        "message": "Hello from server!",
-        "received": request
-    }
+    return {"message": "Hello from server!", "received": request}
 
 
 if __name__ == "__main__":
@@ -39,7 +36,7 @@ if __name__ == "__main__":
     # Get list of topics in the session
     topics = babyros.get_topics_in_session()
     print("Active topics in current session:", topics)
-    
+
     try:
         while True:
             time.sleep(1)

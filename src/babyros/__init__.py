@@ -1,4 +1,3 @@
-
 import json
 import zenoh
 from babyros.node import SessionManager
@@ -68,14 +67,13 @@ def configure(
     transport_unicast_accept_pending=None,
     transport_unicast_accept_timeout=None,
     transport_unicast_max_sessions=None,
-    transport_unicast_open_timeout=None
+    transport_unicast_open_timeout=None,
 ):
     """
     Configure the BabyROS Zenoh session.
     Only parameters passed as arguments will override the default.
     """
     config = zenoh.Config()
-
 
     # Mapping kwargs to Zenoh keys
     mapping = {
