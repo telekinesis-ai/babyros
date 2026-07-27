@@ -37,23 +37,23 @@ try:
     from telekinesis.datatypes import serializer
 except ImportError:
     logger.warning(
-        "telekinesis datatypes package not found; falling back to the legacy "
-        "'datatypes' package. Telekinesis datatype serialization (TDDC/TDOB/TDSQ) "
-        "is unavailable — only plain JSON dicts and numpy arrays (NDAR/NDDC) can "
-        "be sent. New 'telekinesis-datatypes' for full functionality will be released soon."
+        "'telekinesis-datatypes' not found; telekinesis datatype serialization "
+        "(TDDC/TDOB/TDSQ) is unavailable — only plain JSON dicts and numpy arrays "
+        "(NDAR/NDDC) can be sent. 'telekinesis-datatypes' will be released soon."
     )
-    from datatypes import datatypes
     serializer = None
-    # The legacy 'datatypes' package predates BaseDataType, which the encode
-    # predicates reference. Give it an unmatchable placeholder so those
-    # predicates always return False: datatype payloads then fall through to
-    # the normal "No serializer" TypeError, and JSON + numpy keep working
-    # without any guards elsewhere in the codec.
-    if not hasattr(datatypes, "BaseDataType"):
-        class _UnavailableDataType:
-            pass
+    # Datatype support is off, so stub the namespace with an unmatchable
+    # BaseDataType. The encode predicates then always return False and datatype
+    # payloads fall through to the "No serializer" TypeError, while JSON + numpy
+    # keep working and babyros imports with no datatypes package installed.
+    import types
 
-        datatypes.BaseDataType = _UnavailableDataType
+    datatypes = types.ModuleType("datatypes")
+
+    class _UnavailableDataType:
+        pass
+
+    datatypes.BaseDataType = _UnavailableDataType
 
 
 class ZenohCodec:
