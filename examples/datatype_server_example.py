@@ -6,6 +6,7 @@ import time
 import babyros
 from telekinesis import datatypes
 
+
 def handle_request(request: datatypes.Bool | None) -> datatypes.Bool:
     if request is None:
         print("No request payload received.")

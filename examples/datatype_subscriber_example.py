@@ -1,8 +1,10 @@
 """
 Zenoh Subscriber Example with Telekinesis datatype message
 """
+
 import time
 import babyros
+
 
 def log_data(msg):
     """Handle received datatype messages (dict or single datatype)."""
@@ -12,6 +14,7 @@ def log_data(msg):
             print(f"  {key}: {value}")
     else:
         print(f"Received: {msg}")
+
 
 if __name__ == "__main__":
     sub = babyros.node.Subscriber(topic="imu", callback=log_data)

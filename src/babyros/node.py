@@ -3,18 +3,29 @@ Core module definining BabyROS publisher, subscriber, server and client.
 """
 
 from typing import Union, Any
+from enum import Enum
 import threading
 import weakref
 import atexit
 import time
 import zenoh
+import zenoh.ext as zext
 import numpy as np
 from loguru import logger
 from babyros import serializer
 
+
+class Durability(Enum):
+    """Durability policies for publishers and subscribers."""
+
+    VOLATILE = "volatile"
+    TRANSIENT_LOCAL = "transient_local"
+
+
 try:
     from telekinesis.datatypes import EncodedMessage
 except ImportError:
+
     class EncodedMessage:
         def __init__(
             self,
@@ -25,7 +36,9 @@ except ImportError:
             codec: Any,
         ) -> None:
             self.key_expr = key_expr
-            self.timestamp = timestamp  # nanoseconds; arrival time if the publisher did not set one
+            self.timestamp = (
+                timestamp  # nanoseconds; arrival time if the publisher did not set one
+            )
             self.payload = payload
             self.attachment = attachment
             self._codec = codec
@@ -44,6 +57,8 @@ class SessionManager:
     _config = (
         zenoh.Config()
     )  # Default config, can be overridden by user using set_session_config
+    # Needed for the advanced publisher/subscriber to work correctly with transient_local durability.
+    _config.insert_json5("timestamping/enabled", "true")
     _active_nodes = weakref.WeakSet()
     _verbose = False
 
@@ -181,7 +196,14 @@ class Publisher:
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
 
-    def __init__(self, topic: str, compression: str | None = "lz4", verbose: bool = False):
+    def __init__(
+        self,
+        topic: str,
+        compression: str | None = "lz4",
+        durability: Durability = Durability.VOLATILE,
+        depth: int = 1,
+        verbose: bool = False,
+    ):
         """
         Initialize the BabyROS Publisher.
 
@@ -193,6 +215,9 @@ class Publisher:
                 which is faster end-to-end on localhost / fast LANs where
                 the transport is not the bottleneck. Subscribers need no
                 matching setting; the codec is detected from the stream.
+            durability (Durability): The durability policy for the publisher.
+                Options are Durability.VOLATILE (default) or Durability.TRANSIENT_LOCAL.
+            depth (int): The depth of the cache for transient_local durability.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -206,14 +231,31 @@ class Publisher:
 
         if topic[0] == "/":
             raise ValueError("Topic names should not start with '/'.")
+        if not isinstance(durability, Durability):
+            raise TypeError("durability must be an instance of Durability")
+
+        if not isinstance(depth, int) or depth < 1:
+            raise ValueError("depth must be int >= 1")
 
         self._topic = topic
+        self._durability = durability
+        self._depth = depth
         self._verbose = verbose
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
         self._codec = serializer.ZenohCodec(compression=compression)
-        self._pub = self._session.declare_publisher(self._topic)
+        if self._durability is Durability.TRANSIENT_LOCAL:
+            self._pub = zext.declare_advanced_publisher(
+                session=self._session,
+                key_expr=self._topic,
+                cache=zext.CacheConfig(
+                    max_samples=self._depth,
+                ),
+                publisher_detection=True,
+            )
+        else:
+            self._pub = self._session.declare_publisher(self._topic)
 
     def publish(self, data: Union[dict, np.ndarray]):
         """
@@ -259,6 +301,7 @@ class Subscriber:
         self,
         topic: str,
         callback: callable,
+        durability: Durability = Durability.VOLATILE,
         history: str = "keep_last",
         depth: int = 1,
         decode: bool = True,
@@ -272,8 +315,9 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
-            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedMessage 
-            with "undecoded" payload and attachment. Default is True.
+            decode (bool): Whether to decode messages before passing to the callback.
+                If False, the callback receives an EncodedMessage
+                with "undecoded" payload and attachment. Default is True.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -292,11 +336,16 @@ class Subscriber:
             raise ValueError("history must be 'keep_last' or 'keep_all'")
         if not isinstance(depth, int) or depth < 1:
             raise ValueError("depth must be int >= 1")
+        if not isinstance(durability, Durability):
+            raise TypeError(
+                "durability must be an instance of Durability"
+            )
 
         # Populate members
         self._topic = topic
         self._verbose = verbose
         self._callback = callback
+        self._durability = durability
         self._history = history
         self._depth = depth
         self._decode = decode
@@ -313,7 +362,18 @@ class Subscriber:
         else:  # keep_all
             channel = zenoh.handlers.FifoChannel(self._depth)
 
-        self._sub = self._session.declare_subscriber(self._topic, channel)
+        if self._durability is Durability.TRANSIENT_LOCAL:
+            self._sub = zext.declare_advanced_subscriber(
+                session=self._session,
+                key_expr=self._topic,
+                handler=channel,
+                history=zext.HistoryConfig(
+                    detect_late_publishers=True,
+                    max_samples=self._depth,
+                ),
+            )
+        else:
+            self._sub = self._session.declare_subscriber(self._topic, channel)
 
         self._callback_worker = threading.Thread(
             target=self._callback_loop, daemon=True
@@ -339,7 +399,11 @@ class Subscriber:
 
             try:
                 payload = sample.payload.to_bytes()
-                attachment = sample.attachment.to_bytes() if sample.attachment is not None else b""
+                attachment = (
+                    sample.attachment.to_bytes()
+                    if sample.attachment is not None
+                    else b""
+                )
 
                 if not self._decode:
                     ts_ns = time.time_ns()
@@ -348,7 +412,9 @@ class Subscriber:
                             ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
                         except Exception:
                             pass
-                    data = EncodedMessage(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
+                    data = EncodedMessage(
+                        str(sample.key_expr), ts_ns, payload, attachment, self._codec
+                    )
                 else:
                     data = self._codec.decode(payload, attachment)
             except Exception as e:
@@ -403,7 +469,13 @@ class Server:
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
 
-    def __init__(self, topic: str, callback: callable, compression: str | None = "lz4", verbose: bool = False):
+    def __init__(
+        self,
+        topic: str,
+        callback: callable,
+        compression: str | None = "lz4",
+        verbose: bool = False,
+    ):
         """
         Initialize the BabyROS Server.
 
@@ -500,8 +572,11 @@ class Client:
     """
 
     def __init__(
-        self, topic: str, timeout: Union[float, None] = None,
-                 compression: str | None = "lz4", verbose: bool = False
+        self,
+        topic: str,
+        timeout: Union[float, None] = None,
+        compression: str | None = "lz4",
+        verbose: bool = False,
     ):
         """
         Initialize the BabyROS Client.

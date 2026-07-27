@@ -159,9 +159,7 @@ class ZenohCodec:
         payload = serializer.serialize(*data, compression=self._compression)
         return payload, b"TDSQ"
 
-    def _deserialize_datatype_sequence(
-        self, payload: bytes, attachment: bytes
-    ) -> list:
+    def _deserialize_datatype_sequence(self, payload: bytes, attachment: bytes) -> list:
         return list(serializer.deserialize(payload).values())
 
     # -- helpers ----------------------------------------------------------

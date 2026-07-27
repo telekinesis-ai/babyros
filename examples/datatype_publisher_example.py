@@ -1,6 +1,7 @@
 """
 Zenoh Publisher Example
 """
+
 import time
 import numpy as np
 
@@ -20,16 +21,25 @@ if __name__ == "__main__":
     # Start publishing
     print("Starting sensor stream... (Press Ctrl+C to stop)")
     count = 0
-    compressed_image = datatypes.Image(np.ones([3000,30000,3], dtype=np.float32), compression=datatypes.ImageCompression.ZSTD)
+    compressed_image = datatypes.Image(
+        np.ones([3000, 30000, 3], dtype=np.float32),
+        compression=datatypes.ImageCompression.ZSTD,
+    )
 
     try:
         while True:
-            datatype_pub.publish(data={"MyInt": datatypes.Int(42), "MyBool": datatypes.Bool(True), "MyImage": compressed_image})
+            datatype_pub.publish(
+                data={
+                    "MyInt": datatypes.Int(42),
+                    "MyBool": datatypes.Bool(True),
+                    "MyImage": compressed_image,
+                }
+            )
             print(f"Sent seq: {count}")
-            
+
             count += 1
             time.sleep(0.1)  # 10 Hz
-            
+
     except KeyboardInterrupt:
         print("\n[Publisher] Interrupted by user.")
     finally:
