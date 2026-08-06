@@ -191,6 +191,45 @@ class SessionManager:
                 cls._active_nodes.clear()
 
 
+def list_topics(key_expr: str = "**", watch: bool = False, timeout: float = 1.0):
+    """
+    Report the topics that live BabyROS nodes are using.
+
+    Args:
+        key_expr (str): Key expression to match against, relative to the
+            "babyros/" prefix, which is always prepended. Tokens are
+            "<kind>/<topic>", so "publisher/**" matches only publisher topics
+            and "*/robot/**" every topic under "robot". Wildcards follow
+            Zenoh rules: "*" matches one chunk, "**" any number.
+            Default "**" (everything).
+        watch (bool): If False (default), ask once and stop. If True, yield
+            the topics that are already live and then keep a subscription
+            open, yielding forever as nodes come and go.
+        timeout (float): Seconds to wait for replies when watch is False.
+            Nodes that answer later than this are missed, so raise it on
+            slow networks. Ignored when watch is True.
+
+    Yields:
+        tuple[bool, str]: (online, token key), e.g.
+            (True, "babyros/publisher/robot/camera"). online is False only
+            when watching, as a node undeclares its token or dies. A token
+            names a kind/topic pair, not a process, so several nodes sharing
+            a topic collapse into one entry.
+    """
+    session = SessionManager.get_session()
+    key_expr = f"babyros/{key_expr.lstrip('/')}"
+
+    if not watch:
+        replies = session.liveliness().get(key_expr, timeout=timeout)
+        for key in sorted({str(r.ok.key_expr) for r in replies if r.ok}):
+            yield True, key
+        return
+
+    with session.liveliness().declare_subscriber(key_expr, history=True) as subscriber:
+        for sample in subscriber:
+            yield sample.kind == zenoh.SampleKind.PUT, str(sample.key_expr)
+
+
 class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
@@ -244,6 +283,10 @@ class Publisher:
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
+
         self._codec = serializer.ZenohCodec(compression=compression)
         if self._durability is Durability.TRANSIENT_LOCAL:
             self._pub = zext.declare_advanced_publisher(
@@ -287,6 +330,7 @@ class Publisher:
             return
         self._deleted = True
         self._pub.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Publisher on topic '{self._topic}' deleted.")
@@ -337,9 +381,7 @@ class Subscriber:
         if not isinstance(depth, int) or depth < 1:
             raise ValueError("depth must be int >= 1")
         if not isinstance(durability, Durability):
-            raise TypeError(
-                "durability must be an instance of Durability"
-            )
+            raise TypeError("durability must be an instance of Durability")
 
         # Populate members
         self._topic = topic
@@ -352,6 +394,9 @@ class Subscriber:
 
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         self._codec = serializer.ZenohCodec()
         self._running = True
@@ -450,6 +495,8 @@ class Subscriber:
         # Undeclare first: this unblocks the worker's blocking recv() so it can
         # exit, then we wait for the thread to finish.
         self._sub.undeclare()
+        self._token.undeclare()
+
         if self._callback_worker.is_alive():
             self._callback_worker.join(timeout=timeout)
             if self._callback_worker.is_alive():
@@ -510,6 +557,9 @@ class Server:
         self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         # Note: handle_query is the standard name for the callback
         self._queryable = self._session.declare_queryable(
@@ -561,6 +611,7 @@ class Server:
             return
         self._deleted = True
         self._queryable.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Server on topic '{self._topic}' deleted.")
@@ -618,6 +669,9 @@ class Client:
         self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         # Querier.get() takes no timeout, so the deadline is set here at
         # declaration time and applies to every request(). timeout=None lets
@@ -689,6 +743,7 @@ class Client:
             return
         self._deleted = True
         self._querier.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Client for topic '{self._topic}' deleted.")

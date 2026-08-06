@@ -2,8 +2,8 @@
 BabyROS Transient Local Publisher Example
 
 Demonstrates the ROS1 "latched topic" pattern: a static map is published once
-at startup, then the publisher just stays alive. 
-Because durability is TRANSIENT_LOCAL, a Subscriber(durability=TRANSIENT_LOCAL) 
+at startup, then the publisher just stays alive.
+Because durability is TRANSIENT_LOCAL, a Subscriber(durability=TRANSIENT_LOCAL)
 that starts AFTER this map was published will still receive it.
 """
 
@@ -31,7 +31,6 @@ def build_static_map(width: int = 20, height: int = 20) -> dict:
 
 
 if __name__ == "__main__":
-
     durability = babyros.node.Durability.TRANSIENT_LOCAL
     # depth=1: only the latest map matters to a late-joining subscriber.
     map_pub = babyros.node.Publisher(topic="map", durability=durability, depth=1)
