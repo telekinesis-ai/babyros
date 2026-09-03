@@ -1,9 +1,11 @@
 """
-Zenoh Server Example
+BabyROS Server Example: handles both plain dict and Telekinesis datatype
+requests, replying in the same shape as the request.
 """
 
 import time
 import babyros
+from telekinesis import datatypes
 
 
 def handle_request(request):
@@ -11,26 +13,29 @@ def handle_request(request):
     Example service callback.
 
     Args:
-        request (dict | None): Data sent by the client. May be None if the client
-        did not send parameters.
+        request: dict, a Telekinesis datatype, or None if the client sent no
+            parameters.
 
     Returns:
-        dict: The response to be sent back to the client.
-
-    Raises:
-        None
+        A response matching the shape of the request.
     """
-
     if request is None:
-        print("Callback method! No request payload received.")
+        print("No request payload received.")
         return {"message": "No request received!"}
 
-    print("Correct data processesed!")
-    return {"message": "Hello from server!", "received": request}
+    if isinstance(request, dict):
+        print(f"Received dict: {request}")
+        return {"message": "Hello from server!", "received": request}
+
+    print(f"Received datatype: {request}")
+    if isinstance(request, datatypes.Bool):
+        return datatypes.Bool(not request.data)
+    return request
 
 
 if __name__ == "__main__":
-    server = babyros.node.Server("example/topic", handle_request)
+    # compression: "lz4" (default), "zstd", or None for no compression at IPC level
+    server = babyros.node.Server("example/topic", handle_request, compression="zstd")
     print("Server started successfully!")
 
     # Get list of topics in the session

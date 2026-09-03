@@ -31,6 +31,7 @@ dependencies = [
     "eclipse-zenoh>=1.1.0",
     "numpy>=1.26.0",
     "loguru>=0.5.0",
+    "telekinesis-datatypes>=0.3.7",
 ]
 
 [project.scripts]

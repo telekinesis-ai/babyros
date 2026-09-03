@@ -12,6 +12,9 @@ import zenoh
 import zenoh.ext as zext
 import numpy as np
 from loguru import logger
+
+from telekinesis import datatypes
+
 from babyros import serializer
 
 
@@ -22,29 +25,6 @@ class Durability(Enum):
     TRANSIENT_LOCAL = "transient_local"
 
 
-try:
-    from telekinesis.datatypes import EncodedMessage
-except ImportError:
-
-    class EncodedMessage:
-        def __init__(
-            self,
-            key_expr: str,
-            timestamp: int,
-            payload: bytes,
-            attachment: bytes,
-            codec: Any,
-        ) -> None:
-            self.key_expr = key_expr
-            self.timestamp = (
-                timestamp  # nanoseconds; arrival time if the publisher did not set one
-            )
-            self.payload = payload
-            self.attachment = attachment
-            self._codec = codec
-
-        def decode(self) -> Any:
-            return self._codec.decode(self.payload, self.attachment)
 
 
 class SessionManager:
@@ -457,7 +437,7 @@ class Subscriber:
                             ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
                         except Exception:
                             pass
-                    data = EncodedMessage(
+                    data = datatypes.EncodedMessage(
                         str(sample.key_expr), ts_ns, payload, attachment, self._codec
                     )
                 else:

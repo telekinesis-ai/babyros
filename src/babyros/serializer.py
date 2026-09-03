@@ -30,30 +30,8 @@ import json
 import numpy as np
 from typing import Any, Callable, Dict, List, Tuple
 
-from loguru import logger
-
-try:
-    from telekinesis import datatypes
-    from telekinesis.datatypes import serializer
-except ImportError:
-    logger.warning(
-        "'telekinesis-datatypes' not found; telekinesis datatype serialization "
-        "(TDDC/TDOB/TDSQ) is unavailable — only plain JSON dicts and numpy arrays "
-        "(NDAR/NDDC) can be sent. 'telekinesis-datatypes' will be released soon."
-    )
-    serializer = None
-    # Datatype support is off, so stub the namespace with an unmatchable
-    # BaseDataType. The encode predicates then always return False and datatype
-    # payloads fall through to the "No serializer" TypeError, while JSON + numpy
-    # keep working and babyros imports with no datatypes package installed.
-    import types
-
-    datatypes = types.ModuleType("datatypes")
-
-    class _UnavailableDataType:
-        pass
-
-    datatypes.BaseDataType = _UnavailableDataType
+from telekinesis import datatypes
+from telekinesis.datatypes import serializer
 
 
 class ZenohCodec:
