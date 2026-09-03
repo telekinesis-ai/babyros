@@ -3,35 +3,28 @@ Core module definining BabyROS publisher, subscriber, server and client.
 """
 
 from typing import Union, Any
+from enum import Enum
 import threading
 import weakref
 import atexit
 import time
 import zenoh
+import zenoh.ext as zext
 import numpy as np
 from loguru import logger
+
+from telekinesis import datatypes
+
 from babyros import serializer
 
-try:
-    from telekinesis.datatypes import EncodedMessage
-except ImportError:
-    class EncodedMessage:
-        def __init__(
-            self,
-            key_expr: str,
-            timestamp: int,
-            payload: bytes,
-            attachment: bytes,
-            codec: Any,
-        ) -> None:
-            self.key_expr = key_expr
-            self.timestamp = timestamp  # nanoseconds; arrival time if the publisher did not set one
-            self.payload = payload
-            self.attachment = attachment
-            self._codec = codec
 
-        def decode(self) -> Any:
-            return self._codec.decode(self.payload, self.attachment)
+class Durability(Enum):
+    """Durability policies for publishers and subscribers."""
+
+    VOLATILE = "volatile"
+    TRANSIENT_LOCAL = "transient_local"
+
+
 
 
 class SessionManager:
@@ -44,6 +37,8 @@ class SessionManager:
     _config = (
         zenoh.Config()
     )  # Default config, can be overridden by user using set_session_config
+    # Needed for the advanced publisher/subscriber to work correctly with transient_local durability.
+    _config.insert_json5("timestamping/enabled", "true")
     _active_nodes = weakref.WeakSet()
     _verbose = False
 
@@ -176,12 +171,58 @@ class SessionManager:
                 cls._active_nodes.clear()
 
 
+def list_topics(key_expr: str = "**", watch: bool = False, timeout: float = 1.0):
+    """
+    Report the topics that live BabyROS nodes are using.
+
+    Args:
+        key_expr (str): Key expression to match against, relative to the
+            "babyros/" prefix, which is always prepended. Tokens are
+            "<kind>/<topic>", so "publisher/**" matches only publisher topics
+            and "*/robot/**" every topic under "robot". Wildcards follow
+            Zenoh rules: "*" matches one chunk, "**" any number.
+            Default "**" (everything).
+        watch (bool): If False (default), ask once and stop. If True, yield
+            the topics that are already live and then keep a subscription
+            open, yielding forever as nodes come and go.
+        timeout (float): Seconds to wait for replies when watch is False.
+            Nodes that answer later than this are missed, so raise it on
+            slow networks. Ignored when watch is True.
+
+    Yields:
+        tuple[bool, str]: (online, token key), e.g.
+            (True, "babyros/publisher/robot/camera"). online is False only
+            when watching, as a node undeclares its token or dies. A token
+            names a kind/topic pair, not a process, so several nodes sharing
+            a topic collapse into one entry.
+    """
+    session = SessionManager.get_session()
+    key_expr = f"babyros/{key_expr.lstrip('/')}"
+
+    if not watch:
+        replies = session.liveliness().get(key_expr, timeout=timeout)
+        for key in sorted({str(r.ok.key_expr) for r in replies if r.ok}):
+            yield True, key
+        return
+
+    with session.liveliness().declare_subscriber(key_expr, history=True) as subscriber:
+        for sample in subscriber:
+            yield sample.kind == zenoh.SampleKind.PUT, str(sample.key_expr)
+
+
 class Publisher:
     """
     BabyROS Publisher class (based on Zenoh Publisher) for publishing messages to a topic.
     """
 
-    def __init__(self, topic: str, compression: str | None = "lz4", verbose: bool = False):
+    def __init__(
+        self,
+        topic: str,
+        compression: str | None = "lz4",
+        durability: Durability = Durability.VOLATILE,
+        depth: int = 1,
+        verbose: bool = False,
+    ):
         """
         Initialize the BabyROS Publisher.
 
@@ -193,6 +234,9 @@ class Publisher:
                 which is faster end-to-end on localhost / fast LANs where
                 the transport is not the bottleneck. Subscribers need no
                 matching setting; the codec is detected from the stream.
+            durability (Durability): The durability policy for the publisher.
+                Options are Durability.VOLATILE (default) or Durability.TRANSIENT_LOCAL.
+            depth (int): The depth of the cache for transient_local durability.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -206,14 +250,35 @@ class Publisher:
 
         if topic[0] == "/":
             raise ValueError("Topic names should not start with '/'.")
+        if not isinstance(durability, Durability):
+            raise TypeError("durability must be an instance of Durability")
+
+        if not isinstance(depth, int) or depth < 1:
+            raise ValueError("depth must be int >= 1")
 
         self._topic = topic
+        self._durability = durability
+        self._depth = depth
         self._verbose = verbose
         self._deleted = False
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
+
         self._codec = serializer.ZenohCodec(compression=compression)
-        self._pub = self._session.declare_publisher(self._topic)
+        if self._durability is Durability.TRANSIENT_LOCAL:
+            self._pub = zext.declare_advanced_publisher(
+                session=self._session,
+                key_expr=self._topic,
+                cache=zext.CacheConfig(
+                    max_samples=self._depth,
+                ),
+                publisher_detection=True,
+            )
+        else:
+            self._pub = self._session.declare_publisher(self._topic)
 
     def publish(self, data: Union[dict, np.ndarray]):
         """
@@ -245,6 +310,7 @@ class Publisher:
             return
         self._deleted = True
         self._pub.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Publisher on topic '{self._topic}' deleted.")
@@ -259,6 +325,7 @@ class Subscriber:
         self,
         topic: str,
         callback: callable,
+        durability: Durability = Durability.VOLATILE,
         history: str = "keep_last",
         depth: int = 1,
         decode: bool = True,
@@ -272,8 +339,9 @@ class Subscriber:
             callback (callable): The callback function to handle incoming messages.
             history (str): The history policy ("keep_last" or "keep_all"). Default is "keep_last".
             depth (int): The depth of the history buffer. Default is 1.
-            decode (bool): Whether to decode messages before passing to the callback. If False, the callback receives an EncodedMessage 
-            with "undecoded" payload and attachment. Default is True.
+            decode (bool): Whether to decode messages before passing to the callback.
+                If False, the callback receives an EncodedMessage
+                with "undecoded" payload and attachment. Default is True.
             verbose (bool): If True, enables DEBUG/INFO logging. Default is False.
 
         Returns:
@@ -292,17 +360,23 @@ class Subscriber:
             raise ValueError("history must be 'keep_last' or 'keep_all'")
         if not isinstance(depth, int) or depth < 1:
             raise ValueError("depth must be int >= 1")
+        if not isinstance(durability, Durability):
+            raise TypeError("durability must be an instance of Durability")
 
         # Populate members
         self._topic = topic
         self._verbose = verbose
         self._callback = callback
+        self._durability = durability
         self._history = history
         self._depth = depth
         self._decode = decode
 
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         self._codec = serializer.ZenohCodec()
         self._running = True
@@ -313,7 +387,18 @@ class Subscriber:
         else:  # keep_all
             channel = zenoh.handlers.FifoChannel(self._depth)
 
-        self._sub = self._session.declare_subscriber(self._topic, channel)
+        if self._durability is Durability.TRANSIENT_LOCAL:
+            self._sub = zext.declare_advanced_subscriber(
+                session=self._session,
+                key_expr=self._topic,
+                handler=channel,
+                history=zext.HistoryConfig(
+                    detect_late_publishers=True,
+                    max_samples=self._depth,
+                ),
+            )
+        else:
+            self._sub = self._session.declare_subscriber(self._topic, channel)
 
         self._callback_worker = threading.Thread(
             target=self._callback_loop, daemon=True
@@ -339,7 +424,11 @@ class Subscriber:
 
             try:
                 payload = sample.payload.to_bytes()
-                attachment = sample.attachment.to_bytes() if sample.attachment is not None else b""
+                attachment = (
+                    sample.attachment.to_bytes()
+                    if sample.attachment is not None
+                    else b""
+                )
 
                 if not self._decode:
                     ts_ns = time.time_ns()
@@ -348,7 +437,9 @@ class Subscriber:
                             ts_ns = int(sample.timestamp.get_time().timestamp() * 1e9)
                         except Exception:
                             pass
-                    data = EncodedMessage(str(sample.key_expr), ts_ns, payload, attachment, self._codec)
+                    data = datatypes.EncodedMessage(
+                        str(sample.key_expr), ts_ns, payload, attachment, self._codec
+                    )
                 else:
                     data = self._codec.decode(payload, attachment)
             except Exception as e:
@@ -384,6 +475,8 @@ class Subscriber:
         # Undeclare first: this unblocks the worker's blocking recv() so it can
         # exit, then we wait for the thread to finish.
         self._sub.undeclare()
+        self._token.undeclare()
+
         if self._callback_worker.is_alive():
             self._callback_worker.join(timeout=timeout)
             if self._callback_worker.is_alive():
@@ -403,7 +496,13 @@ class Server:
     BabyROS Server (based on Zenoh Queryables) class for handling requests on a topic.
     """
 
-    def __init__(self, topic: str, callback: callable, compression: str | None = "lz4", verbose: bool = False):
+    def __init__(
+        self,
+        topic: str,
+        callback: callable,
+        compression: str | None = "lz4",
+        verbose: bool = False,
+    ):
         """
         Initialize the BabyROS Server.
 
@@ -438,6 +537,9 @@ class Server:
         self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         # Note: handle_query is the standard name for the callback
         self._queryable = self._session.declare_queryable(
@@ -489,6 +591,7 @@ class Server:
             return
         self._deleted = True
         self._queryable.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Server on topic '{self._topic}' deleted.")
@@ -500,8 +603,11 @@ class Client:
     """
 
     def __init__(
-        self, topic: str, timeout: Union[float, None] = None,
-                 compression: str | None = "lz4", verbose: bool = False
+        self,
+        topic: str,
+        timeout: Union[float, None] = None,
+        compression: str | None = "lz4",
+        verbose: bool = False,
     ):
         """
         Initialize the BabyROS Client.
@@ -543,6 +649,9 @@ class Client:
         self._codec = serializer.ZenohCodec(compression=compression)
         self._session = SessionManager.get_session()
         SessionManager.register_node(self)
+        self._token = self._session.liveliness().declare_token(
+            f"babyros/{self.__class__.__name__.lower()}/{self._topic}"
+        )
 
         # Querier.get() takes no timeout, so the deadline is set here at
         # declaration time and applies to every request(). timeout=None lets
@@ -614,6 +723,7 @@ class Client:
             return
         self._deleted = True
         self._querier.undeclare()
+        self._token.undeclare()
         SessionManager.unregister_node(self)
         if self._verbose:
             logger.debug(f"Client for topic '{self._topic}' deleted.")
