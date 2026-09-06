@@ -58,7 +58,7 @@ When testing is done, kill terminal with `Ctrl+C`.
 
 Telekinesis Agentic Skill Library is just the beginning. We're building a community of contributors who grow the Physical AI Skill ecosystem—researchers, hobbyists, and engineers alike. If you have a Skill, we want to see it. Release it, let others use and improve it, and watch it deploy in real-world systems.
 
-[Join our Discord community](https://discord.gg/S5v8bYAnc6) to connect, share, and build together.
+[Join our Discord community](https://discord.com/invite/7NnQ3bQHqm) to connect, share, and build together.
 
 ## Documentation
 
@@ -79,4 +79,4 @@ Telekinesis Agentic Skill Library is just the beginning. We're building a commun
 ## Support
 
 - [GitHub Issues](https://github.com/telekinesis-ai/babyros/issues) — Report bugs or request features
-- [Discord](https://discord.gg/S5v8bYAnc6) — Community support and discussions
+- [Discord](https://discord.com/invite/7NnQ3bQHqm) — Community support and discussions
